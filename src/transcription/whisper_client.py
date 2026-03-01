@@ -15,17 +15,11 @@ class WhisperClient:
         self._client = AsyncOpenAI(api_key=config.openai_api_key)
         self._model = config.whisper_model
 
-    async def transcribe(
-        self,
-        audio_buffer: io.BytesIO,
-        prompt: str | None = None,
-    ) -> str:
+    async def transcribe(self, audio_buffer: io.BytesIO) -> str:
         """Send audio to Whisper API and return the transcription.
 
         Args:
             audio_buffer: In-memory WAV file (BytesIO with .name attribute).
-            prompt: Optional text hint to guide Whisper's vocabulary and style.
-                    Improves accuracy for domain-specific terms and proper nouns.
 
         Returns:
             Transcribed text string.
@@ -35,18 +29,13 @@ class WhisperClient:
         """
         from src.services.error_handler import TranscriptionError
 
-        kwargs: dict = {
-            "model": self._model,
-            "file": audio_buffer,
-            "language": "en",
-            "response_format": "text",
-        }
-        if prompt:
-            # Whisper prompt is capped at 224 tokens; keep it concise
-            kwargs["prompt"] = prompt[:500]
-
         try:
-            response = await self._client.audio.transcriptions.create(**kwargs)
+            response = await self._client.audio.transcriptions.create(
+                model=self._model,
+                file=audio_buffer,
+                language="en",
+                response_format="text",
+            )
             return response.strip()
         except Exception as e:
             raise TranscriptionError(

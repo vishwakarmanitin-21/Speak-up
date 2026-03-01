@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import time
 
-from PyQt5.QtCore import QPoint, QPropertyAnimation, QSize, Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QPoint, QPropertyAnimation, QSize, Qt, QTimer, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import QCursor
 from PyQt5.QtWidgets import (
     QDesktopWidget,
     QGraphicsOpacityEffect,
@@ -57,6 +58,12 @@ class OverlayWidget(QWidget):
         self._hotkey_listener = None  # Set via set_hotkey_listener()
         self._is_compact = self._config.widget_scale == "compact"
         self._compact_expanded = False  # True while mouse hovers in compact mode
+
+        # Polling timer to detect when mouse leaves the compact widget.
+        # leaveEvent is unreliable for frameless translucent tool windows on Windows.
+        self._hover_poll_timer = QTimer()
+        self._hover_poll_timer.setInterval(300)
+        self._hover_poll_timer.timeout.connect(self._check_hover)
 
         self._setup_ui()
         self._connect_signals()
@@ -175,18 +182,37 @@ class OverlayWidget(QWidget):
             self._compact_expanded = True
             self._info_widget.setVisible(True)
             self._settings_btn.setVisible(True)
+            # Let layout expand naturally, then record expanded size
+            self.setMinimumSize(0, 0)
+            self.setMaximumSize(16777215, 16777215)
             self.adjustSize()
-            self._position_widget()
+            self._hover_poll_timer.start()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
-        if self._is_compact and self._compact_expanded and not self._is_recording:
-            self._compact_expanded = False
-            self._info_widget.setVisible(False)
-            self._settings_btn.setVisible(False)
-            self.adjustSize()
-            self._position_widget()
         super().leaveEvent(event)
+
+    def _check_hover(self) -> None:
+        """Poll cursor position; collapse compact widget when mouse leaves."""
+        if not self._is_compact or not self._compact_expanded:
+            self._hover_poll_timer.stop()
+            return
+        if self.geometry().contains(QCursor.pos()):
+            return  # Mouse still over the widget — keep expanded
+        self._hover_poll_timer.stop()
+        self._compact_expanded = False
+        self._info_widget.setVisible(False)
+        self._settings_btn.setVisible(False)
+        # Force widget to shrink to just the mic button
+        mic_sz = self._SCALES["compact"][0]
+        margins = self._SCALES["compact"][2]  # (left, top, right, bottom)
+        w = mic_sz + margins[0] + margins[2]
+        h = mic_sz + margins[1] + margins[3]
+        self.setFixedSize(w, h)
+        self._position_widget()
+        # Re-allow resizing for next expand
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
 
     def _connect_signals(self) -> None:
         self.hotkey_pressed.connect(self._start_recording)
@@ -322,6 +348,9 @@ class OverlayWidget(QWidget):
             # the OS swallowed a key release (common with the Windows key)
             if self._hotkey_listener is not None:
                 self._hotkey_listener.reset_state()
+            # Auto-collapse compact widget if mouse is no longer hovering
+            if self._is_compact and self._compact_expanded:
+                self._hover_poll_timer.start()
 
     def _on_silence(self) -> None:
         """Called when silence is detected during recording."""

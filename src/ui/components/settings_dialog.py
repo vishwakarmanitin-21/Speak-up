@@ -298,9 +298,9 @@ class SettingsDialog(QDialog):
 
     def _save_api_key(self, key: str) -> None:
         """Update the API key in the .env file."""
-        from src.config import _DATA_DIR
+        from pathlib import Path
 
-        env_path = _DATA_DIR / ".env"
+        env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
         lines = []
         key_found = False
 

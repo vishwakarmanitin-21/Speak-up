@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import logging
-
 from src.config import Config
 from src.context.clipboard import get_clipboard_text
 from src.context.selection import get_selected_text
 from src.context.session_memory import SessionMemory
-
-logger = logging.getLogger("flowai")
 
 
 class ContextBuilder:
@@ -23,25 +19,21 @@ class ContextBuilder:
         Returns None if no context is available.
         """
         parts: list[str] = []
-        sources: list[str] = []
 
         if self._config.include_clipboard:
             clip = get_clipboard_text()
             if clip:
                 parts.append(f"[Clipboard]\n{clip}")
-                sources.append(f"clipboard({len(clip)} chars)")
 
         if self._config.include_selection:
             sel = get_selected_text()
             if sel:
                 parts.append(f"[Selected Text]\n{sel}")
-                sources.append(f"selection({len(sel)} chars)")
 
         if self._config.include_session_memory:
             mem = self._session_memory.get_context_summary()
             if mem:
                 parts.append(f"[Session History]\n{mem}")
-                sources.append(f"memory({len(mem)} chars)")
 
         if self._config.include_vscode_file:
             try:
@@ -49,13 +41,7 @@ class ContextBuilder:
                 vsc = get_vscode_file_context()
                 if vsc:
                     parts.append(vsc)
-                    sources.append(f"vscode({len(vsc)} chars)")
-            except Exception as e:
-                logger.warning("VS Code context failed: %s", e)
-
-        if sources:
-            logger.info("Context sources: %s", ", ".join(sources))
-        else:
-            logger.info("Context: no sources available")
+            except Exception:
+                pass
 
         return "\n\n".join(parts) if parts else None

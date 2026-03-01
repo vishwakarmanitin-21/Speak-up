@@ -38,9 +38,7 @@ def _ensure_api_key() -> bool:
         return False
 
     os.environ["OPENAI_API_KEY"] = key
-    from src.config import _DATA_DIR
-
-    env_path = _DATA_DIR / ".env"
+    env_path = Path(__file__).resolve().parent.parent / ".env"
     # Append or create .env with the key
     with open(env_path, "a", encoding="utf-8") as f:
         f.write(f"\nOPENAI_API_KEY={key}\n")

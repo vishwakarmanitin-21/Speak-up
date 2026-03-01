@@ -37,9 +37,7 @@ class RewriteError(FlowAIError):
 
 def setup_logging() -> None:
     """Configure application logging."""
-    from src.config import _DATA_DIR
-
-    log_dir = _DATA_DIR
+    log_dir = Path(__file__).resolve().parent.parent.parent
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

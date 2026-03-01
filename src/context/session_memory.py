@@ -39,19 +39,5 @@ class SessionMemory:
             parts.append(f"[{entry.mode}] {entry.rewritten_text[:200]}")
         return "\n\n".join(parts)
 
-    def get_whisper_prompt(self) -> str | None:
-        """Return a short prompt for Whisper to improve transcription accuracy.
-
-        Uses recent rewritten outputs so Whisper learns the user's vocabulary,
-        proper nouns, and speaking style. Kept short (max ~200 chars) because
-        the Whisper prompt window is limited to 224 tokens.
-        """
-        if not self._entries:
-            return None
-        # Use the last 2 rewritten outputs as a vocabulary hint
-        recent = self._entries[-2:]
-        snippets = [e.rewritten_text[:100] for e in recent]
-        return " ".join(snippets)
-
     def clear(self) -> None:
         self._entries.clear()

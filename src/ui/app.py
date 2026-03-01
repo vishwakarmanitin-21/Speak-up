@@ -106,10 +106,10 @@ def _check_api_key() -> bool:
         api_key = text.strip()
         os.environ["OPENAI_API_KEY"] = api_key
 
-        # Write to .env file (next to exe in frozen mode, project root in dev)
-        from src.config import _DATA_DIR
+        # Write to .env file
+        from pathlib import Path
 
-        env_path = _DATA_DIR / ".env"
+        env_path = Path(__file__).resolve().parent.parent.parent / ".env"
         with open(env_path, "w", encoding="utf-8") as f:
             f.write(f"OPENAI_API_KEY={api_key}\n")
 

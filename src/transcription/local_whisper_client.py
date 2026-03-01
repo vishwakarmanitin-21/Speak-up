@@ -42,7 +42,7 @@ class LocalWhisperClient:
         config = Config()
         self._model_size = config.whisper_local_model_size
 
-    async def transcribe(self, audio_buffer: io.BytesIO, prompt: str | None = None) -> str:
+    async def transcribe(self, audio_buffer: io.BytesIO) -> str:
         """Transcribe in-memory WAV bytes using the local faster-whisper model.
 
         Runs inference in a thread pool so the Qt event loop stays unblocked.

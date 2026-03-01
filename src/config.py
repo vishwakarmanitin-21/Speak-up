@@ -8,23 +8,26 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-def _find_paths() -> tuple[Path, Path]:
-    """Return (bundle_dir, data_dir) for both dev and PyInstaller frozen modes.
+def _find_project_root() -> Path:
+    """Determine project root for user-writable files (config.json, .env)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent.parent
 
-    bundle_dir — read-only bundled assets (config_defaults.json, .env.example).
-                 In PyInstaller onefile mode this is sys._MEIPASS (temp extraction dir).
-    data_dir   — user-writable files (config.json, .env, usage_stats.json).
-                 In frozen mode this is the directory containing the .exe.
+
+def _find_bundle_root() -> Path:
+    """Determine root for bundled read-only files (config_defaults.json).
+
+    In PyInstaller onefile mode, bundled data files are extracted to a
+    temporary directory (sys._MEIPASS), not next to the exe.
     """
     if getattr(sys, "frozen", False):
-        bundle = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-        data = Path(sys.executable).parent
-        return bundle, data
-    root = Path(__file__).resolve().parent.parent
-    return root, root
+        return Path(getattr(sys, "_MEIPASS"))
+    return Path(__file__).resolve().parent.parent
 
 
-_BUNDLE_DIR, _DATA_DIR = _find_paths()
+_PROJECT_ROOT = _find_project_root()
+_BUNDLE_ROOT = _find_bundle_root()
 
 
 class Config:
@@ -50,18 +53,18 @@ class Config:
             self._loaded = True
 
     def _load(self) -> None:
-        # Load .env for API keys (user-writable, lives next to exe)
-        env_path = _DATA_DIR / ".env"
+        # Load .env for API keys
+        env_path = _PROJECT_ROOT / ".env"
         load_dotenv(env_path, override=True)
 
-        # Load defaults (read-only, bundled inside the exe)
-        defaults_path = _BUNDLE_DIR / "config_defaults.json"
+        # Load defaults (bundled read-only file)
+        defaults_path = _BUNDLE_ROOT / "config_defaults.json"
         with open(defaults_path, encoding="utf-8") as f:
             self._defaults: dict = json.load(f)
 
-        # Load user overrides (user-writable, lives next to exe)
+        # Load user overrides (if they exist)
         self._overrides: dict = {}
-        overrides_path = _DATA_DIR / "config.json"
+        overrides_path = _PROJECT_ROOT / "config.json"
         if overrides_path.exists():
             with open(overrides_path, encoding="utf-8") as f:
                 self._overrides = json.load(f)
@@ -194,9 +197,9 @@ class Config:
     # --- Mutation ---
 
     def save_user_overrides(self, overrides: dict) -> None:
-        """Write user overrides to config.json (next to the exe / project root)."""
+        """Write user overrides to config.json."""
         self._overrides.update(overrides)
-        overrides_path = _DATA_DIR / "config.json"
+        overrides_path = _PROJECT_ROOT / "config.json"
         with open(overrides_path, "w", encoding="utf-8") as f:
             json.dump(self._overrides, f, indent=4)
 

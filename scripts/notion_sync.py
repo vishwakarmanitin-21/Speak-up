@@ -5,7 +5,7 @@ import os
 import urllib.request
 from datetime import date
 
-TOKEN = os.environ.get("NOTION_TOKEN", "")
+TOKEN = os.getenv("NOTION_API_TOKEN", "")
 HEADERS = {
     "Authorization": f"Bearer {TOKEN}",
     "Notion-Version": "2022-06-28",

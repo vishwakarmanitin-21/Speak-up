@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import time
 from typing import Callable
 
@@ -13,8 +12,6 @@ from src.output.inserter import OutputInserter
 from src.rewrite.engine import RewriteEngine
 from src.rewrite.modes import RewriteMode
 from src.transcription.factory import get_transcription_client
-
-logger = logging.getLogger("flowai")
 
 
 class PipelineState:
@@ -108,19 +105,9 @@ class Pipeline:
         """
         self._cancelled = False
         _start = time.monotonic()
-        config = Config()
-        logger.info(
-            "Pipeline run: mode=%s, model=%s, temp=%s, provider=%s",
-            mode.value, config.gpt_model, config.temperature,
-            config.transcription_provider,
-        )
         try:
             # 1. Build context from clipboard, selection, session memory, VS Code
             context = self._context_builder.build()
-            logger.info(
-                "Context: %d chars" if context else "Context: none",
-                len(context) if context else 0,
-            )
             if self._cancelled:
                 self._set_state(PipelineState.IDLE)
                 return "", ""
@@ -128,16 +115,8 @@ class Pipeline:
             # 2. Transcribe — pick client from config (cloud or local)
             self._set_state(PipelineState.TRANSCRIBING)
             wav_bytes = self._recorder.get_wav_bytes()
-
-            # Build a Whisper prompt from recent session history for better accuracy
-            whisper_prompt = self._session_memory.get_whisper_prompt()
-
             whisper = get_transcription_client()
-            raw_text = await whisper.transcribe(wav_bytes, prompt=whisper_prompt)
-            logger.info(
-                "Transcription: %d words (%d chars)",
-                len(raw_text.split()), len(raw_text),
-            )
+            raw_text = await whisper.transcribe(wav_bytes)
             if self._cancelled:
                 self._set_state(PipelineState.IDLE)
                 return "", ""
@@ -145,10 +124,6 @@ class Pipeline:
             # 3. Rewrite
             self._set_state(PipelineState.REWRITING)
             rewritten = await self._rewriter.rewrite(raw_text, mode, context)
-            logger.info(
-                "Rewrite: %d words (%d chars)",
-                len(rewritten.split()), len(rewritten),
-            )
             if self._cancelled:
                 self._set_state(PipelineState.IDLE)
                 return "", ""
@@ -160,6 +135,7 @@ class Pipeline:
             self._inserter.deliver(rewritten, output_mode)
 
             # 6. Record usage analytics (non-blocking, best-effort)
+            config = Config()
             if config.track_usage:
                 try:
                     from src.services.usage_tracker import record_run
@@ -173,12 +149,9 @@ class Pipeline:
                 except Exception:
                     pass
 
-            elapsed = time.monotonic() - _start
-            logger.info("Pipeline complete in %.1fs", elapsed)
             self._set_state(PipelineState.DONE)
             return raw_text, rewritten
 
-        except Exception as exc:
-            logger.error("Pipeline error: %s", exc)
+        except Exception:
             self._set_state(PipelineState.ERROR)
             raise

@@ -14,9 +14,8 @@ from pathlib import Path
 
 logger = logging.getLogger("flowai")
 
-from src.config import _DATA_DIR
-
-_STATS_FILE = _DATA_DIR / "usage_stats.json"
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_STATS_FILE = _PROJECT_ROOT / "usage_stats.json"
 
 
 def _load_stats() -> dict:
