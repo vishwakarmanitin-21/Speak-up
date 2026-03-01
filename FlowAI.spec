@@ -1,0 +1,82 @@
+# -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec file for FlowAI.
+
+Build with:  pyinstaller FlowAI.spec
+Output:      dist/FlowAI.exe
+"""
+
+import os
+import sys
+
+block_cipher = None
+
+# Project root (where this spec file lives)
+ROOT = os.path.dirname(os.path.abspath(SPEC))
+
+a = Analysis(
+    [os.path.join(ROOT, 'src', 'main.py')],
+    pathex=[ROOT],
+    binaries=[],
+    datas=[
+        # Bundle config defaults and .env template so the exe is self-contained
+        (os.path.join(ROOT, 'config_defaults.json'), '.'),
+        (os.path.join(ROOT, '.env.example'), '.'),
+    ],
+    hiddenimports=[
+        # qasync needs explicit import
+        'qasync',
+        # PyQt5 plugins
+        'PyQt5.sip',
+        # sounddevice backend
+        'sounddevice',
+        '_sounddevice_data',
+        # pynput backends (Windows)
+        'pynput.keyboard._win32',
+        'pynput.mouse._win32',
+        # stdlib modules sometimes missed
+        'winreg',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        # Exclude heavy optional deps not needed for cloud-only mode
+        'faster_whisper',
+        'ctranslate2',
+        'torch',
+        'torchaudio',
+        'torchvision',
+        # Exclude test frameworks
+        'pytest',
+        'pytest_asyncio',
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='FlowAI',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,  # No console window — GUI app
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,  # Uses default; can add .ico file later
+)

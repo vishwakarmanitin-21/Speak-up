@@ -1,0 +1,28 @@
+[project]
+name = "flowai"
+version = "0.1.0"
+description = "Voice AI productivity tool — converts speech to structured, intelligent text"
+requires-python = ">=3.11"
+dependencies = [
+    "sounddevice>=0.5.0",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "pynput>=1.7.6",
+    "openai>=1.30",
+    "python-dotenv>=1.0",
+    "PyQt5>=5.15",
+    "qasync>=0.27",
+    "pyperclip>=1.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+local = [
+    "faster-whisper>=1.0",
+]
+
+[project.scripts]
+flowai = "src.main:main"

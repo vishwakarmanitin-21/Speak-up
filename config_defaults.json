@@ -1,0 +1,21 @@
+{
+    "whisper_model": "whisper-1",
+    "gpt_model": "gpt-4o-mini",
+    "temperature": 0.3,
+    "hotkey": "ctrl+cmd",
+    "sample_rate": 16000,
+    "silence_timeout_ms": 2000,
+    "auto_stop_on_silence": false,
+    "default_rewrite_mode": "clean_grammar",
+    "output_mode": "auto_paste",
+    "include_clipboard": true,
+    "include_selection": true,
+    "include_session_memory": true,
+    "transcription_provider": "cloud",
+    "whisper_local_model_size": "base",
+    "include_vscode_file": false,
+    "auto_start": false,
+    "track_usage": true,
+    "widget_position": "bottom_right",
+    "widget_scale": "normal"
+}
