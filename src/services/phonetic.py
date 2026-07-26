@@ -48,6 +48,11 @@ _LETTER_FOLD = {
 _MIN_TERM_LEN = 4        # shorter terms fold to keys that collide with everything
 _FUZZY_MIN_KEY_LEN = 7   # only long, distinctive keys may match inexactly
 _MAX_WINDOW = 4          # how many transcript words a term may have been split into
+# Joining several words to reach a SHORT key is where false positives come from:
+# "came all" folds to the same key as "Komal", "not in" to the same as "Nitin".
+# Multi-word matches therefore have to clear a longer, more distinctive key —
+# "Vestora" (7), "WealQuest" (8) and "Wealducate" (9) still qualify.
+_MULTIWORD_MIN_KEY = 6
 
 # Never rewrite these, however they sound — they are ordinary English.
 _NEVER_REPLACE = {
@@ -199,7 +204,10 @@ class PhoneticCorrector:
                     continue
                 if size == 1 and words[0].lower() in _NEVER_REPLACE:
                     continue
-                term = self._lookup(sound_key(joined))
+                key = sound_key(joined)
+                if size > 1 and len(key) < _MULTIWORD_MIN_KEY:
+                    continue      # too short to safely stitch words together
+                term = self._lookup(key)
                 if term is None:
                     continue
                 if joined.lower() == term.replace(" ", "").lower():

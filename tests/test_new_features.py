@@ -131,6 +131,20 @@ def test_phonetic_leaves_ordinary_english_alone(text):
     assert _corrector().correct(text) == text
 
 
+@pytest.mark.parametrize("text", [
+    "she came all the way from the coast",   # 'came all' folds like 'Komal'
+    "it is not in the report yet",           # 'not in'   folds like 'Nitin'
+    "please come all the way here",
+])
+def test_phonetic_does_not_stitch_ordinary_words_into_a_name(text):
+    """Joining words to reach a SHORT key is the main false-positive risk.
+
+    Regression: 'she came all the way' once became 'she Komal the way'.
+    """
+    from src.services.phonetic import PhoneticCorrector
+    assert PhoneticCorrector(["Komal", "Nitin", "Vestora"]).correct(text) == text
+
+
 def test_phonetic_leaves_already_correct_terms_untouched():
     text = "Vestora and WealQuest are both fine"
     assert _corrector().correct(text) == text
