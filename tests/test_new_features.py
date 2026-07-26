@@ -144,6 +144,18 @@ def test_build_user_prompt_includes_text_and_vocab():
     assert "Vestora" in prompt
 
 
+def test_system_prompt_has_number_formatting_rule():
+    """Spoken numbers must come out as digits where they carry data."""
+    from src.rewrite.prompts import SYSTEM_PROMPT
+
+    assert "Numbers:" in SYSTEM_PROMPT
+    assert "DIGITS" in SYSTEM_PROMPT
+    # The rule must cover the data-carrying cases and keep casual prose spelled out.
+    for kind in ("money", "percentages", "times", "versions"):
+        assert kind in SYSTEM_PROMPT
+    assert "one-to-nine" in SYSTEM_PROMPT
+
+
 # --------------------------------------------------------------------------- #
 # Streaming inserter: boundaries, ordering, clipboard restore
 # --------------------------------------------------------------------------- #
