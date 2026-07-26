@@ -350,7 +350,7 @@ def test_stream_restores_clipboard(monkeypatch):
     monkeypatch.setattr("src.output.inserter._RESTORE_DELAY_S", 0.02)
     fake = _FakeClip("ORIGINAL")
     inst = _make_inserter(monkeypatch, fake)
-    inst._paste = lambda chunk: None  # stub the actual paste
+    inst._paste = _stub_paste(inst, fake)   # pastes for real, minus the keyboard
 
     inst.begin_stream()           # snapshots "ORIGINAL"
     inst.feed_stream("Some new dictated text here. ")
@@ -365,7 +365,9 @@ def test_restore_is_delayed_not_immediate(monkeypatch):
     Restoring immediately is what made dictation paste the user's OLD clipboard
     instead of the transcript.
     """
-    monkeypatch.setattr("src.output.inserter._RESTORE_DELAY_S", 0.5)
+    # A long delay makes this deterministic: the restore cannot plausibly fire
+    # before the assertion below, however loaded the machine is.
+    monkeypatch.setattr("src.output.inserter._RESTORE_DELAY_S", 30.0)
     fake = _FakeClip("ORIGINAL")
     inst = _make_inserter(monkeypatch, fake)
     inst._paste = _stub_paste(inst, fake)
@@ -376,12 +378,32 @@ def test_restore_is_delayed_not_immediate(monkeypatch):
 
     # Right after end_stream the dictation must still own the clipboard.
     assert fake.clip != "ORIGINAL", "restored too early — a pending paste would insert the old clipboard"
-    assert _wait_for(lambda: fake.clip == "ORIGINAL"), "never restored"
+
+
+def test_no_restore_when_nothing_was_pasted(monkeypatch):
+    """If we never wrote the clipboard, we must not 'restore' over it.
+
+    Otherwise a dictation that produced no output would blindly overwrite
+    whatever the user copied in the meantime.
+    """
+    monkeypatch.setattr("src.output.inserter._RESTORE_DELAY_S", 0.02)
+    fake = _FakeClip("ORIGINAL")
+    inst = _make_inserter(monkeypatch, fake)
+
+    inst.begin_stream()
+    inst.end_stream()                       # no chunks fed → nothing pasted
+    fake.copy("USER COPIED THIS AFTERWARDS")
+
+    import time as _t
+    _t.sleep(0.2)
+    assert fake.clip == "USER COPIED THIS AFTERWARDS"
 
 
 def test_restore_skipped_when_another_app_takes_clipboard(monkeypatch):
     """If something else owns the clipboard by restore time, don't clobber it."""
-    monkeypatch.setattr("src.output.inserter._RESTORE_DELAY_S", 0.05)
+    # Generous delay so the competing copy below is definitely in place before
+    # the restore worker wakes — otherwise this test would race the scheduler.
+    monkeypatch.setattr("src.output.inserter._RESTORE_DELAY_S", 0.4)
     fake = _FakeClip("ORIGINAL")
     inst = _make_inserter(monkeypatch, fake)
     inst._paste = _stub_paste(inst, fake)
@@ -392,7 +414,7 @@ def test_restore_skipped_when_another_app_takes_clipboard(monkeypatch):
     fake.copy("USER COPIED SOMETHING ELSE")  # another app wins the clipboard
 
     import time as _t
-    _t.sleep(0.3)
+    _t.sleep(1.2)                             # well past the restore delay
     assert fake.clip == "USER COPIED SOMETHING ELSE"
 
 

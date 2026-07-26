@@ -104,10 +104,15 @@ class OutputInserter:
         2. Only restore if the clipboard still holds what WE put there — if
            something else has taken it over since, leave it alone.
         """
+        if ours is None:
+            # Nothing was ever put on the clipboard, so it was never clobbered —
+            # restoring would blindly overwrite whatever the user has since copied.
+            return
+
         def _worker() -> None:
             time.sleep(_RESTORE_DELAY_S)
             try:
-                if ours is not None and pyperclip.paste() != ours:
+                if pyperclip.paste() != ours:
                     return  # another app owns the clipboard now — don't fight it
                 pyperclip.copy(previous)
             except Exception:
