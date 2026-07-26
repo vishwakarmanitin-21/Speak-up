@@ -12,6 +12,13 @@ from src.config import Config
 
 logger = logging.getLogger("speakup")
 
+# Ctrl+V is ASYNCHRONOUS: the target app reads the clipboard whenever it gets
+# round to processing the keystroke, which can be long after we sent it. So the
+# clipboard must not change while a paste we sent might still be pending.
+_CHUNK_SETTLE_S = 0.035   # after Ctrl+V, before the next chunk overwrites it
+_RESTORE_DELAY_S = 0.6    # after the last paste, before restoring the old value
+                          # (runs on a background thread, so it costs no latency)
+
 
 class OutputMode:
     AUTO_PASTE = "auto_paste"
@@ -28,6 +35,7 @@ class OutputInserter:
         self._stream_buffer = ""
         self._first_chunk_done = False
         self._saved_clipboard: str | None = None
+        self._last_pasted: str | None = None  # guards the clipboard restore
         # Background paste worker (set up per streaming run)
         self._paste_queue: queue.Queue | None = None
         self._paste_worker: threading.Thread | None = None
@@ -83,12 +91,29 @@ class OutputInserter:
         self._keyboard.release(Key.ctrl)
 
         if not keep:
-            # Let the paste consume the clipboard before restoring the old value.
-            time.sleep(0.1)
+            self._restore_clipboard_later(previous, text)
+
+    def _restore_clipboard_later(self, previous: str, ours: str) -> None:
+        """Put the user's clipboard back, once pending pastes have certainly landed.
+
+        Restoring too early is what made dictation paste the user's OLD clipboard
+        content instead of the transcript: Ctrl+V is asynchronous, so a paste we
+        had already sent could read the clipboard AFTER we restored it. Two guards:
+
+        1. Wait a generous delay (on a background thread, so no added latency).
+        2. Only restore if the clipboard still holds what WE put there — if
+           something else has taken it over since, leave it alone.
+        """
+        def _worker() -> None:
+            time.sleep(_RESTORE_DELAY_S)
             try:
+                if ours is not None and pyperclip.paste() != ours:
+                    return  # another app owns the clipboard now — don't fight it
                 pyperclip.copy(previous)
             except Exception:
                 logger.warning("Could not restore previous clipboard contents")
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _copy_to_clipboard(self, text: str) -> None:
         """Just copy to clipboard."""
@@ -102,12 +127,15 @@ class OutputInserter:
         this paste is consumed. Kept minimal for snappy streaming.
         """
         pyperclip.copy(text)
+        self._last_pasted = text
         time.sleep(0.025)
         self._keyboard.press(Key.ctrl)
         self._keyboard.press("v")
         self._keyboard.release("v")
         self._keyboard.release(Key.ctrl)
-        time.sleep(0.018)
+        # Give the target app time to CONSUME this paste before the next chunk
+        # overwrites the clipboard, or it would insert the wrong chunk.
+        time.sleep(_CHUNK_SETTLE_S)
 
     # --- Streaming output (background paste thread: overlaps with generation) ---
 
@@ -122,6 +150,7 @@ class OutputInserter:
         self._stream_buffer = ""
         self._first_chunk_done = False
         self._saved_clipboard = None
+        self._last_pasted = None
         if not self._config.keep_on_clipboard:
             try:
                 self._saved_clipboard = pyperclip.paste()
@@ -155,11 +184,9 @@ class OutputInserter:
         self._paste_queue = None
 
         if not self._config.keep_on_clipboard and self._saved_clipboard is not None:
-            time.sleep(0.05)
-            try:
-                pyperclip.copy(self._saved_clipboard)
-            except Exception:
-                logger.warning("Could not restore previous clipboard contents")
+            # Delayed + guarded: the final Ctrl+V may still be pending, and
+            # restoring underneath it would paste the OLD clipboard instead.
+            self._restore_clipboard_later(self._saved_clipboard, self._last_pasted)
         self._saved_clipboard = None
 
     def _enqueue_chunk(self) -> None:

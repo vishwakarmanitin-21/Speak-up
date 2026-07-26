@@ -247,16 +247,75 @@ def test_stream_preserves_order(monkeypatch):
     )
 
 
+def _stub_paste(inst, fake):
+    """Stand-in for OutputInserter._paste: writes the clipboard and records what
+    we last put there (the real method does both), but touches no keyboard."""
+    def _paste(chunk):
+        fake.copy(chunk)
+        inst._last_pasted = chunk
+    return _paste
+
+
+def _wait_for(predicate, timeout=2.0):
+    """Wait for a background (delayed) clipboard restore to land."""
+    import time as _t
+
+    deadline = _t.monotonic() + timeout
+    while _t.monotonic() < deadline:
+        if predicate():
+            return True
+        _t.sleep(0.01)
+    return False
+
+
 def test_stream_restores_clipboard(monkeypatch):
+    monkeypatch.setattr("src.output.inserter._RESTORE_DELAY_S", 0.02)
     fake = _FakeClip("ORIGINAL")
     inst = _make_inserter(monkeypatch, fake)
     inst._paste = lambda chunk: None  # stub the actual paste
 
     inst.begin_stream()           # snapshots "ORIGINAL"
     inst.feed_stream("Some new dictated text here. ")
-    inst.end_stream()             # restores the snapshot
+    inst.end_stream()             # schedules the guarded restore
 
-    assert fake.clip == "ORIGINAL"
+    assert _wait_for(lambda: fake.clip == "ORIGINAL"), f"got {fake.clip!r}"
+
+
+def test_restore_is_delayed_not_immediate(monkeypatch):
+    """The restore must NOT land while a Ctrl+V we sent could still be pending.
+
+    Restoring immediately is what made dictation paste the user's OLD clipboard
+    instead of the transcript.
+    """
+    monkeypatch.setattr("src.output.inserter._RESTORE_DELAY_S", 0.5)
+    fake = _FakeClip("ORIGINAL")
+    inst = _make_inserter(monkeypatch, fake)
+    inst._paste = _stub_paste(inst, fake)
+
+    inst.begin_stream()
+    inst.feed_stream("Dictated sentence lands here. ")
+    inst.end_stream()
+
+    # Right after end_stream the dictation must still own the clipboard.
+    assert fake.clip != "ORIGINAL", "restored too early — a pending paste would insert the old clipboard"
+    assert _wait_for(lambda: fake.clip == "ORIGINAL"), "never restored"
+
+
+def test_restore_skipped_when_another_app_takes_clipboard(monkeypatch):
+    """If something else owns the clipboard by restore time, don't clobber it."""
+    monkeypatch.setattr("src.output.inserter._RESTORE_DELAY_S", 0.05)
+    fake = _FakeClip("ORIGINAL")
+    inst = _make_inserter(monkeypatch, fake)
+    inst._paste = _stub_paste(inst, fake)
+
+    inst.begin_stream()
+    inst.feed_stream("Dictated text. ")
+    inst.end_stream()
+    fake.copy("USER COPIED SOMETHING ELSE")  # another app wins the clipboard
+
+    import time as _t
+    _t.sleep(0.3)
+    assert fake.clip == "USER COPIED SOMETHING ELSE"
 
 
 # --------------------------------------------------------------------------- #
