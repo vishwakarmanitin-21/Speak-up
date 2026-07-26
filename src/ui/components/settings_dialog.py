@@ -263,6 +263,13 @@ class SettingsDialog(QDialog):
         self._vocab_edit.setFixedHeight(70)
         vocab_layout.addWidget(self._vocab_edit)
 
+        self._phonetic_check = QCheckBox("Fix mis-heard dictionary terms automatically")
+        self._phonetic_check.setToolTip(
+            "Repairs dictionary names the transcriber got wrong or split up "
+            "(e.g. \"west or a\" → \"Vestora\"). Uses only the terms above."
+        )
+        vocab_layout.addWidget(self._phonetic_check)
+
         self._suggest_check = QCheckBox("Suggest new terms from my dictations")
         self._suggest_check.setToolTip(
             "Auto-suggest uncommon names/jargon from your speech. Uncheck to stop "
@@ -554,6 +561,7 @@ class SettingsDialog(QDialog):
 
         # Personal dictionary
         self._vocab_edit.setPlainText(", ".join(self._config.custom_vocabulary))
+        self._phonetic_check.setChecked(self._config.phonetic_correction)
         self._suggest_check.setChecked(self._config.suggest_dictionary_terms)
         self._refresh_suggestions()
 
@@ -656,6 +664,7 @@ class SettingsDialog(QDialog):
             "include_vscode_file": self._include_vscode_check.isChecked(),
             "custom_vocabulary": vocab,
             "suggest_dictionary_terms": self._suggest_check.isChecked(),
+            "phonetic_correction": self._phonetic_check.isChecked(),
             "auto_start": self._auto_start_check.isChecked(),
             "widget_position": self._position_combo.currentData(),
             "widget_scale": self._scale_combo.currentData(),

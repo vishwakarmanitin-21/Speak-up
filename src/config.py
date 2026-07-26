@@ -319,6 +319,15 @@ class Config:
         """Whether to auto-suggest new personal-dictionary terms from dictations."""
         return bool(self._get("suggest_dictionary_terms", True))
 
+    @property
+    def phonetic_correction(self) -> bool:
+        """Repair dictionary terms the transcriber mis-heard or split up.
+
+        e.g. "west or a" -> "Vestora". Deterministic and local; uses only the
+        terms already in your personal dictionary.
+        """
+        return bool(self._get("phonetic_correction", True))
+
     # --- Mutation ---
 
     def save_user_overrides(self, overrides: dict) -> None:

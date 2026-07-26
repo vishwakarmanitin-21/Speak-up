@@ -116,9 +116,10 @@ build, GitHub release, and the locally installed copy always end up in sync:
 .\release.ps1
 ```
 
-Each run **bumps the minor version automatically** (1.1.0 → 1.2.0 → 1.3.0), so
-every exe has its own version and you can always tell which build is running
-(tray → About) and whether a machine has the latest. It then runs the tests,
+Each run **bumps the version automatically** — fixes and small enhancements
+bump the third place (1.2.0 → 1.2.1 → 1.2.2), so every exe has its own version
+and you can always tell which build is running (tray → About) and whether a
+machine has the latest. It then runs the tests,
 rebuilds `dist\SpeakUp.exe`, commits and pushes the version bump, creates the
 GitHub release for the new version and uploads the exe, then closes the running
 app, overwrites the installed copy at
@@ -130,7 +131,8 @@ ship code that isn't on GitHub).
 
 | Flag | Effect |
 |------|--------|
-| `-Major` | Start a new series instead of bumping the minor (1.4.0 → 2.0.0) |
+| `-Minor` | Mark a feature release (1.2.5 → 1.3.0) |
+| `-Major` | Start a new series (1.3.7 → 2.0.0) |
 | `-NoBump` | Reuse the current version (for iterating without burning versions) |
 | `-SkipTests` | Skip the test run |
 | `-NoRelease` | Don't touch GitHub |
@@ -287,6 +289,7 @@ Settings can be changed via the gear icon on the overlay or by editing `config.j
 | `widget_scale` | `compact` | Widget size: `compact` (hover-expand), `normal`, or `large` (2x) |
 | `widget_opacity` | `1.0` | Overlay/caption opacity, `0.3`–`1.0` (Settings → Opacity slider) |
 | `caption_max_lines` | `6` | Lines the live caption grows to before older words scroll off, `2`–`12` (Settings → Caption height) |
+| `phonetic_correction` | `true` | Repair dictionary terms the transcriber mis-heard or split up, e.g. "west or a" → "Vestora" (Settings → Personal Dictionary) |
 | `auto_start` | `true` | Start SpeakUp automatically with Windows (default on; toggle off in Settings) |
 | `track_usage` | `true` | Log usage stats (incl. estimated cost) to `usage_stats.json` |
 | `log_transcripts` | `false` | **Debug.** Log the raw transcript to `speakup.log` (may contain sensitive text) |

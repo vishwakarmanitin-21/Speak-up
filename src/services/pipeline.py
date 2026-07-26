@@ -226,6 +226,14 @@ class Pipeline:
                 whisper = get_transcription_client()
                 raw_text = await whisper.transcribe(wav_bytes)
             logger.info("Transcription: %d words (%d chars)", len(raw_text.split()), len(raw_text))
+            # Repair dictionary terms the transcriber mis-heard or split into
+            # other words ("west or a" -> "Vestora") BEFORE the rewrite, so the
+            # model sees the right proper nouns instead of guessing at them.
+            try:
+                from src.services.phonetic import build_corrector
+                raw_text = build_corrector().correct(raw_text)
+            except Exception as e:
+                logger.debug("Phonetic correction skipped: %s", e)
             if config.log_transcripts:
                 logger.info("RAW TRANSCRIPT: %r", raw_text)
             if raw_text.strip():

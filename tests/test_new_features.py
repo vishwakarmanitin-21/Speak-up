@@ -98,6 +98,70 @@ def test_learner_ignore_removes_suggestion(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# Phonetic repair of mis-heard dictionary terms (self-learning phase 1)
+# --------------------------------------------------------------------------- #
+
+_VOCAB = ["Nitin", "Prisha", "Komal", "Pranit", "Vestora", "WealQuest", "Wealducate"]
+
+
+def _corrector():
+    from src.services.phonetic import PhoneticCorrector
+    return PhoneticCorrector(_VOCAB)
+
+
+@pytest.mark.parametrize("heard,expected", [
+    ("I spoke to west or a about it", "Vestora"),      # term split across words
+    ("the well quest roadmap is ready", "WealQuest"),
+    ("send it to well due cate today", "Wealducate"),
+    ("Nithin will join", "Nitin"),                      # single mis-spelling
+    ("ask Komall about it", "Komal"),
+])
+def test_phonetic_restores_misheard_terms(heard, expected):
+    assert expected in _corrector().correct(heard)
+
+
+@pytest.mark.parametrize("text", [
+    "the west side of the building was quiet",   # 'west' alone is not Vestora
+    "well, that went better than expected",
+    "I want to make a request for the team",
+    "please send the report before the meeting",
+])
+def test_phonetic_leaves_ordinary_english_alone(text):
+    """A wrong replacement corrupts the user's words — precision over recall."""
+    assert _corrector().correct(text) == text
+
+
+def test_phonetic_leaves_already_correct_terms_untouched():
+    text = "Vestora and WealQuest are both fine"
+    assert _corrector().correct(text) == text
+
+
+def test_phonetic_preserves_punctuation():
+    out = _corrector().correct("I called west or a, then left.")
+    assert "Vestora," in out and out.endswith("left.")
+
+
+def test_phonetic_noop_without_vocabulary():
+    from src.services.phonetic import PhoneticCorrector
+    text = "west or a and well quest"
+    assert PhoneticCorrector([]).correct(text) == text
+
+
+def test_deepgram_url_boosts_dictionary_terms(monkeypatch):
+    """The dictionary must reach the live transcriber, not just the rewrite."""
+    import src.transcription.deepgram_client as dg
+
+    class _Cfg:
+        custom_vocabulary = ["Vestora", "WealQuest"]
+
+    monkeypatch.setattr(dg, "Config", lambda: _Cfg())
+    url = dg._build_url()
+    assert "keywords=Vestora%3A2" in url
+    assert "keywords=WealQuest%3A2" in url
+    assert "model=nova-2" in url  # base params still present
+
+
+# --------------------------------------------------------------------------- #
 # Live-caption typewriter reveal
 # --------------------------------------------------------------------------- #
 

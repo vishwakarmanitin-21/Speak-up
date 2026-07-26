@@ -7,7 +7,7 @@
     for "the app" to actually be updated everywhere, in order, and aborts loudly
     if any step fails:
 
-      0. Bump the MINOR version in src\version.py  (skip with -NoBump)
+      0. Bump the PATCH version in src\version.py  (skip with -NoBump)
       1. Run the test suite            (skip with -SkipTests)
       2. Rebuild the exe (PyInstaller) -> dist\SpeakUp.exe
       3. Commit + push the version bump so the release tag isn't stale
@@ -17,9 +17,10 @@
          app first and relaunching it if it was open (skip with -NoInstall)
 
     EVERY build gets its own version, so you can always tell which one is
-    running (tray -> About) and whether a machine has the latest. The minor
-    number keeps incrementing (1.1.0 -> 1.2.0 -> 1.3.0); -Major starts a new
-    series (1.4.0 -> 2.0.0); -NoBump reuses the current version while iterating.
+    running (tray -> About) and whether a machine has the latest. Fixes and
+    small enhancements bump the THIRD place (1.2.0 -> 1.2.1 -> 1.2.2); -Minor
+    marks a feature release (1.2.5 -> 1.3.0); -Major starts a new series
+    (1.3.7 -> 2.0.0); -NoBump reuses the current version while iterating.
     src\version.py is the single source of truth for the app, exe and tag.
 
 .EXAMPLE
@@ -36,8 +37,9 @@ param(
     [switch]$NoRelease,   # don't touch the GitHub release
     [switch]$NoInstall,   # don't update the locally installed copy
     [switch]$Relaunch,    # relaunch the app even if it wasn't running
-    [switch]$NoBump,      # reuse the current version instead of bumping the minor
-    [switch]$Major        # bump MAJOR and reset minor (1.4.0 -> 2.0.0)
+    [switch]$NoBump,      # reuse the current version instead of bumping
+    [switch]$Minor,       # bump MINOR for a feature release (1.2.5 -> 1.3.0)
+    [switch]$Major        # bump MAJOR for a new series  (1.3.7 -> 2.0.0)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,24 +53,27 @@ function Warn($msg) { Write-Host $msg -ForegroundColor Yellow }
 $py = Join-Path $root '.venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { throw "venv Python not found at $py — create the virtualenv first." }
 
-# --- Version: bump the MINOR on every build (single source of truth) -------- #
+# --- Version: bump the PATCH on every build (single source of truth) -------- #
 # Every exe gets its own version so you can always tell which build is running.
-# Minor keeps incrementing (1.1.0 -> 1.2.0 -> 1.3.0); -Major starts a new series
-# (1.4.0 -> 2.0.0); -NoBump reuses the current version while iterating.
+# Small fixes/enhancements bump the third place (1.2.0 -> 1.2.1 -> 1.2.2);
+# -Minor marks a feature release (1.2.5 -> 1.3.0); -Major starts a new series
+# (1.3.7 -> 2.0.0); -NoBump reuses the current version while iterating.
 $verFile = Join-Path $root 'src\version.py'
 $verMatch = Select-String -Path $verFile -Pattern '__version__\s*=\s*"([^"]+)"'
 if (-not $verMatch) { throw "Could not read __version__ from src\version.py" }
 $current = $verMatch.Matches[0].Groups[1].Value
 $parts = $current.Split('.')
 if ($parts.Count -lt 3) { throw "Unexpected version format '$current' (want MAJOR.MINOR.PATCH)" }
-[int]$maj = $parts[0]; [int]$min = $parts[1]
+[int]$maj = $parts[0]; [int]$min = $parts[1]; [int]$pat = $parts[2]
 
 if ($NoBump) {
     $version = $current
     Warn "Reusing version $version (-NoBump)"
 } else {
-    if ($Major) { $maj++; $min = 0 } else { $min++ }
-    $version = "$maj.$min.0"
+    if     ($Major) { $maj++; $min = 0; $pat = 0 }
+    elseif ($Minor) { $min++; $pat = 0 }
+    else            { $pat++ }
+    $version = "$maj.$min.$pat"
     # Rewrite the single source of truth, then verify it took.
     (Get-Content $verFile -Raw) `
         -replace '__version__\s*=\s*"[^"]+"', "__version__ = `"$version`"" `

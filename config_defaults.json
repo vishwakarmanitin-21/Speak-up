@@ -26,5 +26,6 @@
     "widget_scale": "compact",
     "widget_opacity": 1.0,
     "caption_max_lines": 6,
-    "suggest_dictionary_terms": true
+    "suggest_dictionary_terms": true,
+    "phonetic_correction": true
 }

@@ -39,7 +39,43 @@ _DG_PARAMS = {
     "smart_format": "true",
     "punctuate": "true",
 }
-_DG_URL = "wss://api.deepgram.com/v1/listen?" + urllib.parse.urlencode(_DG_PARAMS)
+_DG_BASE_URL = "wss://api.deepgram.com/v1/listen?"
+_KEYWORD_BOOST = 2    # nova-2 default is 1; higher raises false positives
+_MAX_KEYWORDS = 100   # Deepgram's per-request limit
+
+
+def _build_url() -> str:
+    """Build the listen URL, boosting the user's personal-dictionary terms.
+
+    Without this the transcriber has never heard of "Vestora" or "WealQuest" and
+    reliably mangles them — the dictionary was only reaching the rewrite step,
+    which is too late to recover a badly mis-heard name. nova-2 takes repeated
+    `keywords=TERM:INTENSIFIER` params.
+    """
+    params: list[tuple[str, str]] = list(_DG_PARAMS.items())
+    try:
+        from src.services.phonetic import _is_ordinary_word
+
+        terms: list[str] = []
+        for term in Config().custom_vocabulary:
+            term = (term or "").strip()
+            # Boosting everyday words ("Order", "Additionally") raises false
+            # positives — Deepgram's own guidance — so only boost real names.
+            if not term or _is_ordinary_word(term):
+                continue
+            # Boost the whole term, plus its distinctive parts if multi-word,
+            # so "Wealducate Ecosystem" helps even when only one word is spoken.
+            for piece in [term] + (term.split() if " " in term else []):
+                piece = piece.strip()
+                if len(piece) >= 3 and piece not in terms:
+                    terms.append(piece)
+        for term in terms[:_MAX_KEYWORDS]:
+            params.append(("keywords", f"{term}:{_KEYWORD_BOOST}"))
+        if terms:
+            logger.info("Deepgram: boosting %d dictionary term(s)", len(terms[:_MAX_KEYWORDS]))
+    except Exception as e:  # a bad dictionary must never stop transcription
+        logger.debug("Could not add dictionary keywords: %s", e)
+    return _DG_BASE_URL + urllib.parse.urlencode(params)
 
 
 async def _ws_connect(url: str, headers: dict):
@@ -106,7 +142,7 @@ class DeepgramTranscriber:
             headers = {"Authorization": f"Token {key}"}
             for attempt in range(3):
                 try:
-                    ws = await _ws_connect(_DG_URL, headers)
+                    ws = await _ws_connect(_build_url(), headers)
                     break
                 except Exception as e:
                     if attempt < 2:
