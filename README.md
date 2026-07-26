@@ -116,14 +116,26 @@ build, GitHub release, and the locally installed copy always end up in sync:
 .\release.ps1
 ```
 
-It runs the tests, rebuilds `dist\SpeakUp.exe`, uploads it to the GitHub
-release for the current version (from `src\version.py`, creating the release if
-needed), then closes the running app, overwrites the installed copy at
+Each run **bumps the minor version automatically** (1.1.0 → 1.2.0 → 1.3.0), so
+every exe has its own version and you can always tell which build is running
+(tray → About) and whether a machine has the latest. It then runs the tests,
+rebuilds `dist\SpeakUp.exe`, commits and pushes the version bump, creates the
+GitHub release for the new version and uploads the exe, then closes the running
+app, overwrites the installed copy at
 `%LOCALAPPDATA%\Programs\SpeakUp\SpeakUp.exe`, and relaunches it. It warns first
-if you have uncommitted or unpushed changes (so the exe can't silently ship code
-that isn't on GitHub). Flags: `-SkipTests`, `-NoRelease`, `-NoInstall`,
-`-Relaunch`. Bump `__version__` in `src\version.py` and the release targets the
-new tag automatically.
+if you have other uncommitted or unpushed changes (so the exe can't silently
+ship code that isn't on GitHub).
+
+`src\version.py` is the single source of truth for the app, the exe and the tag.
+
+| Flag | Effect |
+|------|--------|
+| `-Major` | Start a new series instead of bumping the minor (1.4.0 → 2.0.0) |
+| `-NoBump` | Reuse the current version (for iterating without burning versions) |
+| `-SkipTests` | Skip the test run |
+| `-NoRelease` | Don't touch GitHub |
+| `-NoInstall` | Don't update the installed copy |
+| `-Relaunch` | Relaunch the app even if it wasn't running |
 
 ## Usage
 
