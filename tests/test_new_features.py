@@ -144,6 +144,48 @@ def test_build_user_prompt_includes_text_and_vocab():
     assert "Vestora" in prompt
 
 
+def test_guard_comes_after_the_transcript():
+    """The anti-answering guard must be LAST.
+
+    When the transcript is the final thing in the prompt, a spoken imperative
+    ("give me a step-by-step guide...") reads as the live instruction and the
+    model obeys it instead of transcribing. The guard has to come after it.
+    """
+    from src.rewrite.modes import RewriteMode
+    from src.rewrite.prompts import build_user_prompt
+
+    spoken = "give me a step-by-step guide to connect to the server"
+    prompt = build_user_prompt(RewriteMode.SMART, spoken, context="prior stuff")
+
+    assert spoken in prompt
+    assert prompt.index(spoken) < prompt.index("Reminder before you answer")
+    assert "NOT a task for you" in prompt
+    assert "Do not copy anything from the Context section" in prompt
+    # The guard must be the FINAL block — no input/context section after it.
+    tail = prompt[prompt.index("Reminder before you answer"):]
+    assert "--- " not in tail
+
+
+def test_session_memory_dedupes_repeated_dictations():
+    """Repeating a dictation must not fill the context with N copies of it."""
+    from src.context.session_memory import SessionMemory
+
+    m = SessionMemory()
+    dmarc = "v=DMARC1; p=none; rua=mailto:dmarc@example.com; fo=1"
+    for _ in range(3):
+        m.add(dmarc, dmarc, "smart")
+    summary = m.get_context_summary()
+    assert summary.count("v=DMARC1") == 1
+
+    # Distinct entries are still all kept.
+    m2 = SessionMemory()
+    for t in ("alpha", "beta", "gamma"):
+        m2.add(t, t, "smart")
+    s2 = m2.get_context_summary()
+    for t in ("alpha", "beta", "gamma"):
+        assert t in s2
+
+
 def test_system_prompt_has_number_formatting_rule():
     """Spoken numbers must come out as digits where they carry data."""
     from src.rewrite.prompts import SYSTEM_PROMPT
