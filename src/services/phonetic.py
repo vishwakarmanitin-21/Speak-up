@@ -106,6 +106,10 @@ def sound_key(text: str) -> str:
         return ""
     for a, b in _DIGRAPHS:
         s = s.replace(a, b)
+    # Soft c: before e/i/y it is an /s/ sound, not /k/ — "Vercel" is "ver-SELL",
+    # so it must fold like the "s" a transcriber hears ("WERSAL"). Note 'g' is
+    # NOT treated the same way: "get"/"give" keep a hard g before e/i.
+    s = re.sub(r"c(?=[eiy])", "s", s)
     out = [_LETTER_FOLD.get(ch, ch) for ch in s]
     folded = "".join(out)
     # Collapse runs ("ll" -> "l"): doubled sounds are not distinguishable.

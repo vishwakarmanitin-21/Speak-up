@@ -131,6 +131,24 @@ def test_phonetic_leaves_ordinary_english_alone(text):
     assert _corrector().correct(text) == text
 
 
+def test_phonetic_handles_soft_c():
+    """'Vercel' is said "ver-SELL", so its c must fold to /s/, not /k/.
+
+    Regression: it was heard as "WERSAL" and left uncorrected because c always
+    folded to k. Hard c ("CAMS", "Cloud") must be unaffected.
+    """
+    from src.services.phonetic import PhoneticCorrector, sound_key
+
+    assert sound_key("Vercel") == sound_key("WERSAL")
+    assert sound_key("CAMS") != sound_key("Vercel")
+    pc = PhoneticCorrector(["Vercel", "CAMS", "Cloud", "Claude"])
+    assert pc.correct("deployed on WERSAL today") == "deployed on Vercel today"
+    # Ordinary soft-c English must survive.
+    for text in ["the cell tower is down", "a circle and a cycle differ",
+                 "I will cancel the meeting"]:
+        assert pc.correct(text) == text
+
+
 @pytest.mark.parametrize("text", [
     "she came all the way from the coast",   # 'came all' folds like 'Komal'
     "it is not in the report yet",           # 'not in'   folds like 'Nitin'
