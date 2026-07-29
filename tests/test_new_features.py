@@ -222,6 +222,22 @@ def test_build_user_prompt_includes_text_and_vocab():
     assert "Vestora" in prompt
 
 
+def test_vocabulary_prompt_forbids_forcing_a_match():
+    """Regression: 'finish' was being rewritten to a term containing 'fin'.
+
+    The old wording ("if a spoken word sounds like one of these") was loose
+    enough that the model matched ordinary English on a few shared sounds.
+    """
+    from src.rewrite.modes import RewriteMode
+    from src.rewrite.prompts import build_user_prompt
+
+    prompt = build_user_prompt(
+        RewriteMode.CLEAN_GRAMMAR, "let me finish this", vocabulary=["KFinTech"]
+    )
+    assert "Do NOT force a match" in prompt
+    assert "when in doubt, keep the dictated word" in prompt
+
+
 def test_guard_comes_after_the_transcript():
     """The anti-answering guard must be LAST.
 

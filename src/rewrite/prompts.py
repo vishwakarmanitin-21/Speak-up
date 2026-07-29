@@ -154,8 +154,15 @@ def build_user_prompt(
         terms = ", ".join(vocabulary)
         parts.append(
             "\n\n--- Known terms ---\n"
-            "If a spoken word sounds like one of these, use this exact spelling:\n"
-            f"{terms}\n--- End Known terms ---"
+            "The speaker's names and jargon. Use these EXACT spellings when the "
+            "speaker clearly meant one of them:\n"
+            f"{terms}\n"
+            "Do NOT force a match. If a word is ordinary English that merely "
+            "shares a few sounds with one of these, leave it EXACTLY as dictated "
+            "— e.g. 'finish' is the word 'finish', not a term that happens to "
+            "contain 'fin'. Only correct an unmistakable mis-transcription of one "
+            "of these terms; when in doubt, keep the dictated word.\n"
+            "--- End Known terms ---"
         )
 
     if context:
