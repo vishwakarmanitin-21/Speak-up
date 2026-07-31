@@ -55,6 +55,8 @@ EXPECTED_TERMS = [
 _DG_URL = "https://api.deepgram.com/v1/listen"
 _OPENAI_ENGINES = ["gpt-4o-transcribe", "gpt-transcribe", "gpt-4o-mini-transcribe"]
 _DG_ENGINES = ["nova-2", "nova-3"]
+# Realtime-only: 404s on the file endpoint, so it goes over a WebSocket session.
+_REALTIME_ENGINES = ["gpt-live-transcribe"]
 
 
 # --------------------------------------------------------------------------- #
@@ -131,11 +133,113 @@ def transcribe_deepgram(model: str, audio: bytes, vocabulary: list[str]) -> str:
     return data["results"]["channels"][0]["alternatives"][0]["transcript"]
 
 
-def record_microphone(seconds: int, rate: int = 16000) -> bytes:
+def _beep(freq: int = 880, ms: int = 220, rate: int = 44100) -> None:
+    """Short tone so the cue is AUDIBLE — the terminal may not be in view."""
+    try:
+        import numpy as np
+        import sounddevice as sd
+
+        t = np.linspace(0, ms / 1000, int(rate * ms / 1000), endpoint=False)
+        tone = (0.25 * np.sin(2 * np.pi * freq * t)).astype("float32")
+        sd.play(tone, rate)
+        sd.wait()
+    except Exception:
+        pass
+
+
+def transcribe_openai_realtime(model: str, audio: bytes, vocabulary: list[str]) -> str:
+    """gpt-live-transcribe only exists over a realtime session — it 404s on the
+    file endpoint — so feed the clip through a WebSocket the way the app does.
+
+    This also exercises the app's own session config (languages array vs
+    language string, keyword biasing) against the live API.
+    """
+    import asyncio
+    import base64
+    import json as _json
+
+    import numpy as np
+    from scipy.io.wavfile import read as wav_read
+
+    from src.transcription.realtime_client import build_transcription_config
+
+    rate, samples = wav_read(io.BytesIO(audio))
+    if samples.ndim > 1:
+        samples = samples[:, 0]
+    if samples.dtype != np.int16:                       # normalise to PCM16
+        samples = (np.clip(samples.astype("float32"), -1, 1) * 32767).astype("<i2")
+    # The Realtime API rejects rates below 24 kHz ('integer_below_min_value'),
+    # so upsample anything recorded lower rather than failing the comparison.
+    if rate < 24000:
+        from scipy.signal import resample_poly
+        samples = resample_poly(samples.astype("float32"), 24000, rate)
+        samples = np.clip(samples, -32768, 32767).astype("<i2")
+        rate = 24000
+    pcm = samples.astype("<i2").tobytes()
+
+    async def _run() -> str:
+        import websockets
+
+        url = "wss://api.openai.com/v1/realtime?intent=transcription"
+        headers = {"Authorization": f"Bearer {Config().openai_api_key}"}
+        try:
+            ws = await websockets.connect(url, additional_headers=headers, max_size=None)
+        except TypeError:
+            ws = await websockets.connect(url, extra_headers=headers, max_size=None)
+
+        finals: list[str] = []
+        async with ws:
+            cfg = build_transcription_config(model, vocabulary)
+            await ws.send(_json.dumps({
+                "type": "session.update",
+                "session": {
+                    "type": "transcription",
+                    "audio": {"input": {
+                        "format": {"type": "audio/pcm", "rate": int(rate)},
+                        "transcription": cfg,
+                        # No server VAD: we push a whole file and commit it.
+                        "turn_detection": None,
+                    }},
+                },
+            }))
+            chunk = int(rate * 2 * 0.2)                  # ~200ms of PCM16
+            for i in range(0, len(pcm), chunk):
+                await ws.send(_json.dumps({
+                    "type": "input_audio_buffer.append",
+                    "audio": base64.b64encode(pcm[i:i + chunk]).decode(),
+                }))
+            await ws.send(_json.dumps({"type": "input_audio_buffer.commit"}))
+
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 60.0
+            while loop.time() < deadline:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    if finals:
+                        break
+                    continue
+                except Exception:
+                    break
+                msg = _json.loads(raw)
+                mtype = msg.get("type", "")
+                if mtype.endswith("input_audio_transcription.completed"):
+                    t = (msg.get("transcript") or "").strip()
+                    if t:
+                        finals.append(t)
+                elif mtype == "error":
+                    raise RuntimeError(str(msg.get("error"))[:160])
+        return " ".join(finals)
+
+    return asyncio.run(_run())
+
+
+def record_microphone(seconds: int, rate: int = 24000, lead_in: int = 6) -> bytes:
     """Record from the default mic and return WAV bytes.
 
     Synthesised speech is clean and accent-neutral; only a real recording tells
-    you how the engines handle YOUR voice, mic and room.
+    you how the engines handle YOUR voice, mic and room. Start/stop are signalled
+    with beeps so you do not have to watch the terminal to get the timing right.
     """
     import io as _io
 
@@ -146,16 +250,22 @@ def record_microphone(seconds: int, rate: int = 16000) -> bytes:
     print("\n" + "=" * 70)
     print("Read this aloud, at your normal dictation pace:\n")
     print(f"  {REFERENCE}\n")
-    print(f"Recording for {seconds}s — starting in 3 seconds...")
-    print("=" * 70)
-    sd.sleep(3000)
-    print(">>> SPEAK NOW <<<")
+    print(f"HIGH beep = start speaking. {seconds}s later, LOW beep = done.")
+    print(f"Starting in {lead_in} seconds...")
+    print("=" * 70, flush=True)
+    sd.sleep(lead_in * 1000)
+    _beep(880, 250)                      # high tone: go
+    print(">>> SPEAK NOW <<<", flush=True)
     frames = sd.rec(int(seconds * rate), samplerate=rate, channels=1, dtype="float32")
     sd.wait()
-    print("Recorded.\n")
+    _beep(440, 350)                      # low tone: stop
+    print("Recorded.", flush=True)
+
+    peak = float(np.max(np.abs(frames))) if frames.size else 0.0
+    print(f"Signal peak {peak:.3f}", flush=True)
     buf = _io.BytesIO()
     wav_write(buf, rate, (np.clip(frames[:, 0], -1, 1) * 32767).astype("<i2"))
-    return buf.getvalue()
+    return buf.getvalue(), peak
 
 
 def generate_speech(text: str, voice: str = "alloy") -> bytes:
@@ -170,6 +280,13 @@ def generate_speech(text: str, voice: str = "alloy") -> bytes:
 # --------------------------------------------------------------------------- #
 
 def main() -> int:
+    # Transcripts can contain characters the Windows console codepage cannot
+    # encode; without this the whole run dies at the final print.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--audio", help="WAV file of you reading the reference text")
     ap.add_argument("--generate", action="store_true", help="synthesise the clip with TTS")
@@ -178,6 +295,8 @@ def main() -> int:
                          "— the only result that really counts")
     ap.add_argument("--engines", help="comma-separated subset to run")
     ap.add_argument("--no-vocab", action="store_true", help="run without dictionary biasing")
+    ap.add_argument("--lead-in", type=int, default=6, metavar="SECONDS",
+                    help="pause before recording starts (default 6)")
     ap.add_argument("--trials", type=int, default=1,
                     help="repeat N times and average — single runs are noisy "
                          "(engines vary run to run), so use 3+ before deciding")
@@ -185,11 +304,23 @@ def main() -> int:
 
     voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
     if args.record:
-        clips = [record_microphone(args.record)]
-        source = f"your voice ({args.record}s from the microphone)"
+        clip, peak = record_microphone(args.record, lead_in=args.lead_in)
         out = Path(__file__).resolve().parent.parent / "benchmark_voice.wav"
-        out.write_bytes(clips[0])
-        print(f"Saved to {out} — rerun with --audio to re-test without re-recording.\n")
+        out.write_bytes(clip)
+        print(f"Saved to {out}\n")
+        if peak < 0.03:
+            # Abort rather than burn API calls scoring an empty room — and the
+            # scores would look like real engine failures, which is worse.
+            print("=" * 70)
+            print(f"ABORTED: that clip is essentially silent (peak {peak:.3f}).")
+            print("The mic may be muted/wrong device, or the timing was missed.")
+            print("Re-run and start reading at the HIGH beep:")
+            print("  .venv\\Scripts\\python.exe scripts\\benchmark_transcription.py "
+                  "--record 32 --lead-in 15")
+            print("=" * 70)
+            return 1
+        clips = [clip]
+        source = f"your voice ({args.record}s from the microphone)"
         args.trials = 1
     elif args.audio:
         clips = [Path(args.audio).read_bytes()]
@@ -207,7 +338,7 @@ def main() -> int:
         ap.error("pass --record, --audio <file.wav>, or --generate")
 
     vocabulary = [] if args.no_vocab else Config().custom_vocabulary
-    engines = _DG_ENGINES + _OPENAI_ENGINES
+    engines = _DG_ENGINES + _OPENAI_ENGINES + _REALTIME_ENGINES
     if args.engines:
         wanted = {e.strip() for e in args.engines.split(",")}
         engines = [e for e in engines if e in wanted]
@@ -223,6 +354,8 @@ def main() -> int:
             try:
                 if engine in _DG_ENGINES:
                     text = transcribe_deepgram(engine, clip, vocabulary)
+                elif engine in _REALTIME_ENGINES:
+                    text = transcribe_openai_realtime(engine, clip, vocabulary)
                 else:
                     text = transcribe_openai(engine, clip, vocabulary)
                 hits, missed = term_hits(text, EXPECTED_TERMS)
