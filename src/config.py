@@ -255,6 +255,19 @@ class Config:
         return bool(self._get("transcription_realtime", False))
 
     @property
+    def live_engine(self) -> str:
+        """Which engine powers live transcription: 'auto', 'deepgram' or 'openai'.
+
+        'auto' keeps the historical behaviour — Deepgram when a key is set,
+        otherwise OpenAI. Making it explicit lets you A/B the two in daily use:
+        on a real-voice benchmark OpenAI's gpt-live-transcribe was markedly more
+        accurate on this user's vocabulary, but Deepgram was chosen originally
+        for snappy word-by-word captions, so latency is the trade to feel.
+        """
+        value = str(self._get("live_engine", "auto")).lower().strip()
+        return value if value in ("auto", "deepgram", "openai") else "auto"
+
+    @property
     def whisper_local_model_size(self) -> str:
         """faster-whisper model size: tiny, base, small, medium, large."""
         return self._get("whisper_local_model_size", "base")

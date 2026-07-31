@@ -107,6 +107,31 @@ python scripts/build.py
 # Output: dist/SpeakUp.exe
 ```
 
+### Choosing a live engine
+
+Two engines can transcribe while you speak, and they trade off differently:
+
+- **Deepgram** — chosen originally for snappy word-by-word captions.
+- **OpenAI** (`gpt-live-transcribe`) — markedly more accurate on names and
+  acronyms in testing.
+
+Pick one in **Settings → Transcription → Live engine**; it applies from your next
+dictation. `auto` (the default) keeps the historical behaviour: Deepgram when a
+Deepgram key is set, OpenAI otherwise. Each dictation logs which engine ran
+(`Live engine: …` in `speakup.log`), so an A/B is easy to confirm.
+
+Don't take the defaults on faith — measure both on your own voice:
+
+```bash
+python scripts/benchmark_transcription.py --record 35 --lead-in 10
+```
+
+It scores every engine on how many of *your* dictionary terms survive, plus word
+error rate. On the author's voice the ranking was gpt-4o-transcribe 12/13 →
+gpt-live-transcribe 11/13 → nova-3 9/13 → nova-2 8/13, but accuracy is
+voice-dependent — and the benchmark does not measure latency, which is the other
+half of the decision.
+
 ### Releasing (one command)
 
 `release.ps1` does the whole release in one step so it can't be half-done —
@@ -290,6 +315,7 @@ Settings can be changed via the gear icon on the overlay or by editing `config.j
 | `widget_opacity` | `1.0` | Overlay/caption opacity, `0.3`–`1.0` (Settings → Opacity slider) |
 | `caption_max_lines` | `6` | Lines the live caption grows to before older words scroll off, `2`–`12` (Settings → Caption height) |
 | `phonetic_correction` | `true` | Repair dictionary terms the transcriber mis-heard or split up, e.g. "west or a" → "Vestora" (Settings → Personal Dictionary) |
+| `live_engine` | `auto` | Which engine transcribes while you speak: `auto` (Deepgram if a key is set), `deepgram`, or `openai` (gpt-live-transcribe). See "Choosing a live engine" below |
 | `auto_start` | `true` | Start SpeakUp automatically with Windows (default on; toggle off in Settings) |
 | `track_usage` | `true` | Log usage stats (incl. estimated cost) to `usage_stats.json` |
 | `log_transcripts` | `false` | **Debug.** Log the raw transcript to `speakup.log` (may contain sensitive text) |

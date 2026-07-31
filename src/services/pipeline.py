@@ -137,13 +137,27 @@ class Pipeline:
         self._realtime = None
         if self._config.transcription_realtime:
             try:
-                if self._config.deepgram_api_key:
+                # Which engine transcribes while you speak. 'auto' keeps the old
+                # behaviour (Deepgram when a key is set); the explicit choices
+                # let the two be compared in real use — they differ in both
+                # accuracy and caption feel, so this is a judgement call.
+                engine = self._config.live_engine
+                has_deepgram = bool(self._config.deepgram_api_key)
+                use_deepgram = has_deepgram and engine in ("auto", "deepgram")
+                if engine == "deepgram" and not has_deepgram:
+                    self._notify("Deepgram key not set — using OpenAI for live transcription.")
+
+                if use_deepgram:
                     # Deepgram streams true word-by-word interim captions.
                     from src.transcription.deepgram_client import DeepgramTranscriber
                     self._realtime = DeepgramTranscriber(on_caption=self._on_caption)
                 else:
                     from src.transcription.realtime_client import RealtimeTranscriber
                     self._realtime = RealtimeTranscriber(on_caption=self._on_caption)
+                logger.info(
+                    "Live engine: %s (setting=%s)",
+                    "deepgram" if use_deepgram else "openai", engine,
+                )
                 self._realtime.start()  # synchronous — capture begins immediately
                 self._use_realtime = True
             except Exception as e:

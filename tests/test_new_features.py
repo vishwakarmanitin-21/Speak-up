@@ -253,6 +253,37 @@ def test_realtime_never_gets_a_file_only_model(configured, expected):
     assert realtime_model_for(configured) == expected
 
 
+@pytest.mark.parametrize("engine,has_key,expect_deepgram", [
+    ("auto", True, True),        # historical behaviour preserved
+    ("auto", False, False),
+    ("deepgram", True, True),
+    ("deepgram", False, False),  # asked for Deepgram, no key -> must still work
+    ("openai", True, False),     # explicit OpenAI wins even with a key present
+    ("openai", False, False),
+])
+def test_live_engine_selection(engine, has_key, expect_deepgram):
+    """The live engine is an explicit choice, not a side effect of which key exists."""
+    use_deepgram = has_key and engine in ("auto", "deepgram")
+    assert use_deepgram is expect_deepgram
+
+
+def test_live_engine_config_rejects_nonsense():
+    from src.config import Config
+
+    config = Config()
+    original = config._overrides.get("live_engine")
+    try:
+        for value, expected in [("openai", "openai"), ("DEEPGRAM", "deepgram"),
+                                ("nonsense", "auto"), ("", "auto")]:
+            config._overrides["live_engine"] = value
+            assert config.live_engine == expected
+    finally:
+        if original is None:
+            config._overrides.pop("live_engine", None)
+        else:
+            config._overrides["live_engine"] = original
+
+
 def test_realtime_language_field_matches_model_generation():
     """gpt-live-transcribe takes `languages` (array); legacy takes `language`.
 

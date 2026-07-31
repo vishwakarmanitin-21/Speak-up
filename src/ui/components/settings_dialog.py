@@ -175,6 +175,20 @@ class SettingsDialog(QDialog):
         self._realtime_check.setObjectName("experimental")  # amber-tinted label
         transcription_layout.addRow(self._realtime_check)
 
+        self._live_engine_combo = QComboBox()
+        self._live_engine_combo.addItem("Auto (Deepgram if key is set)", "auto")
+        self._live_engine_combo.addItem("Deepgram (fastest captions)", "deepgram")
+        self._live_engine_combo.addItem("OpenAI (more accurate on tests)", "openai")
+        self._live_engine_combo.setToolTip(
+            "Which engine transcribes while you speak.\n"
+            "On a benchmark of your own voice OpenAI's gpt-live-transcribe was "
+            "markedly more accurate on your names and acronyms; Deepgram was "
+            "originally chosen for snappy word-by-word captions.\n"
+            "Try both — accuracy and caption feel are the trade-off. Takes "
+            "effect on your next dictation."
+        )
+        transcription_layout.addRow("Live engine:", self._live_engine_combo)
+
         self._deepgram_key_input = QLineEdit()
         self._deepgram_key_input.setEchoMode(QLineEdit.Password)
         self._deepgram_key_input.setPlaceholderText(
@@ -366,6 +380,7 @@ class SettingsDialog(QDialog):
         self._transcription_provider_combo.currentIndexChanged.connect(
             self._update_dependent_states)
         self._auto_stop_check.toggled.connect(self._update_dependent_states)
+        self._realtime_check.toggled.connect(self._update_dependent_states)
 
         # Style — dark theme with readable labels and a single accent (mic blue)
         self.setStyleSheet("""
@@ -434,6 +449,10 @@ class SettingsDialog(QDialog):
         # Cloud speech model and live transcription apply only to the cloud provider.
         self._whisper_model_combo.setEnabled(not is_local)
         self._realtime_check.setEnabled(not is_local)
+        # The live engine only matters when live transcription is actually on.
+        self._live_engine_combo.setEnabled(
+            not is_local and self._realtime_check.isChecked()
+        )
         # Silence timeout only matters when auto-stop is on.
         self._silence_timeout_spin.setEnabled(self._auto_stop_check.isChecked())
 
@@ -547,6 +566,10 @@ class SettingsDialog(QDialog):
             self._local_model_combo.setCurrentIndex(idx)
 
         self._realtime_check.setChecked(self._config.transcription_realtime)
+        for i in range(self._live_engine_combo.count()):
+            if self._live_engine_combo.itemData(i) == self._config.live_engine:
+                self._live_engine_combo.setCurrentIndex(i)
+                break
 
         # Widget appearance
         for i in range(self._position_combo.count()):
@@ -664,6 +687,7 @@ class SettingsDialog(QDialog):
             "silence_timeout_ms": self._silence_timeout_spin.value(),
             "transcription_provider": self._transcription_provider_combo.currentData(),
             "transcription_realtime": self._realtime_check.isChecked(),
+            "live_engine": self._live_engine_combo.currentData(),
             "whisper_local_model_size": self._local_model_combo.currentText(),
             "include_clipboard": self._include_clipboard_check.isChecked(),
             "include_selection": self._include_selection_check.isChecked(),
