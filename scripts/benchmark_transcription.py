@@ -338,6 +338,16 @@ def main() -> int:
         ap.error("pass --record, --audio <file.wav>, or --generate")
 
     vocabulary = [] if args.no_vocab else Config().custom_vocabulary
+    if vocabulary:
+        # Match what the app actually sends: ordinary words are stripped out.
+        # Boosting them measurably HURTS — with "I'm" left in the dictionary,
+        # nova-2 transcribed "CAMS" as "I'm".
+        from src.services.phonetic import _is_ordinary_word
+        dropped = [t for t in vocabulary if _is_ordinary_word(t)]
+        vocabulary = [t for t in vocabulary if not _is_ordinary_word(t)]
+        if dropped:
+            print(f"(filtered {len(dropped)} ordinary word(s) from the dictionary, "
+                  f"as the app does: {', '.join(dropped)})")
     engines = _DG_ENGINES + _OPENAI_ENGINES + _REALTIME_ENGINES
     if args.engines:
         wanted = {e.strip() for e in args.engines.split(",")}
