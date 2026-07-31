@@ -37,6 +37,11 @@ class WhisperClient:
         vocab = config.custom_vocabulary
         if vocab:
             kwargs["prompt"] = "Terms: " + ", ".join(vocab)
+            # gpt-transcribe adds a `keywords` parameter meant precisely for
+            # literal product/people names — stronger than the prose `prompt`.
+            # Only the newer model accepts it, so it is sent selectively.
+            if config.whisper_model.startswith("gpt-transcribe"):
+                kwargs["extra_body"] = {"keywords": list(vocab)[:100]}
 
         try:
             response = await client.audio.transcriptions.create(**kwargs)

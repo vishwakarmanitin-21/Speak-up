@@ -91,7 +91,8 @@ class SettingsDialog(QDialog):
 
         self._whisper_model_combo = QComboBox()
         self._whisper_model_combo.addItems(
-            ["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"]
+            ["gpt-4o-transcribe", "gpt-transcribe", "gpt-4o-mini-transcribe",
+             "whisper-1"]
         )
         api_layout.addRow("Speech Model (cloud):", self._whisper_model_combo)
 
@@ -330,8 +331,14 @@ class SettingsDialog(QDialog):
 
         # Tooltips for the non-obvious settings
         self._whisper_model_combo.setToolTip(
-            "gpt-4o-transcribe is the most accurate; gpt-4o-mini-transcribe is "
-            "faster; whisper-1 is the legacy model.")
+            "Which model turns your speech into text.\n"
+            "gpt-4o-transcribe: the current default — solid all-rounder.\n"
+            "gpt-transcribe: OpenAI's newest; worth trying, but test it on your "
+            "own words first — it is not automatically better for every voice.\n"
+            "gpt-4o-mini-transcribe: faster and cheaper.\n"
+            "whisper-1: the legacy model.\n"
+            "Live captions use Deepgram when a Deepgram key is set, so this "
+            "setting then applies to the standard (non-live) path.")
         self._temperature_spin.setToolTip(
             "Lower = more faithful to your words; higher = more creative. "
             "0.2 recommended.")

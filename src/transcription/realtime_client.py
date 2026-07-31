@@ -57,13 +57,59 @@ async def _ws_connect(url: str, headers: dict):
         return await websockets.connect(url, extra_headers=headers, max_size=None)
 
 
+# gpt-live-transcribe is OpenAI's current realtime transcription model (successor
+# to gpt-realtime-whisper) and the only one that streams DELTAS as you speak,
+# which is what live captions need. whisper-1 is file-only; gpt-transcribe can be
+# used in a realtime session but only transcribes after commit — no live text —
+# so neither can drive this path.
+_REALTIME_DEFAULT = "gpt-live-transcribe"
+_NO_LIVE_DELTAS = {"gpt-transcribe", "whisper-1"}
+
+# The newer models take a `languages` ARRAY; the legacy ones take a `language`
+# string. Sending both is explicitly not allowed.
+_LANGUAGES_ARRAY_MODELS = {"gpt-live-transcribe", "gpt-transcribe"}
+
+
+def realtime_model_for(configured: str) -> str:
+    """Map the configured speech model to one that can stream live captions."""
+    model = (configured or "").strip()
+    if not model or model in _NO_LIVE_DELTAS or "transcribe" not in model:
+        return _REALTIME_DEFAULT
+    return model
+
+
+def build_transcription_config(model: str, vocabulary: list[str] | None = None) -> dict:
+    """Build the session's transcription block for `model`.
+
+    Handles the language field split between model generations, and biases
+    recognition with the user's dictionary (`keywords` is meant for literal
+    names; `prompt` gives the model context).
+    """
+    cfg: dict = {"model": model}
+    if model in _LANGUAGES_ARRAY_MODELS:
+        cfg["languages"] = ["en"]
+    else:
+        cfg["language"] = "en"
+
+    terms: list[str] = []
+    try:
+        from src.services.phonetic import _is_ordinary_word
+        terms = [t for t in (vocabulary or [])
+                 if t and not _is_ordinary_word(t)][:100]
+    except Exception:
+        terms = list(vocabulary or [])[:100]
+    if terms:
+        cfg["keywords"] = terms
+        cfg["prompt"] = "Terms: " + ", ".join(terms)
+    return cfg
+
+
 class RealtimeTranscriber:
     """Streams mic audio to the OpenAI Realtime API on its own thread/loop."""
 
     def __init__(self, on_caption=None) -> None:
         config = Config()
-        model = config.whisper_model
-        self._model = model if "transcribe" in model else "gpt-4o-transcribe"
+        self._model = realtime_model_for(config.whisper_model)
         self._on_caption = on_caption        # callable(str) — live partial text (best-effort)
         self._mic: sd.InputStream | None = None
         self._pcm_buffer: list[bytes] = []   # ALL captured frames (shared, append-only)
@@ -136,7 +182,9 @@ class RealtimeTranscriber:
                     "audio": {
                         "input": {
                             "format": {"type": "audio/pcm", "rate": _SAMPLE_RATE},
-                            "transcription": {"model": self._model, "language": "en"},
+                            "transcription": build_transcription_config(
+                                self._model, Config().custom_vocabulary
+                            ),
                             "turn_detection": {
                                 "type": "server_vad",
                                 "threshold": 0.5,

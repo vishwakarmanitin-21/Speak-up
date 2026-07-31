@@ -240,6 +240,44 @@ def test_build_user_prompt_includes_text_and_vocab():
     assert "Vestora" in prompt
 
 
+@pytest.mark.parametrize("configured,expected", [
+    ("gpt-transcribe", "gpt-live-transcribe"),   # file-only → must not be used live
+    ("whisper-1", "gpt-live-transcribe"),
+    ("", "gpt-live-transcribe"),
+    ("gpt-4o-transcribe", "gpt-4o-transcribe"),  # realtime-capable → passes through
+    ("gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe"),
+])
+def test_realtime_never_gets_a_file_only_model(configured, expected):
+    """Picking a file-only speech model must not break live transcription."""
+    from src.transcription.realtime_client import realtime_model_for
+    assert realtime_model_for(configured) == expected
+
+
+def test_realtime_language_field_matches_model_generation():
+    """gpt-live-transcribe takes `languages` (array); legacy takes `language`.
+
+    Sending both is explicitly disallowed, so the wrong field would break the
+    live session.
+    """
+    from src.transcription.realtime_client import build_transcription_config
+
+    new = build_transcription_config("gpt-live-transcribe")
+    assert new["languages"] == ["en"] and "language" not in new
+
+    legacy = build_transcription_config("gpt-4o-transcribe")
+    assert legacy["language"] == "en" and "languages" not in legacy
+
+
+def test_realtime_config_biases_dictionary_but_drops_ordinary_words():
+    from src.transcription.realtime_client import build_transcription_config
+
+    cfg = build_transcription_config(
+        "gpt-live-transcribe", ["Vestora", "KFinTech", "Order", "I'm"]
+    )
+    assert "Vestora" in cfg["keywords"] and "KFinTech" in cfg["keywords"]
+    assert "Order" not in cfg["keywords"] and "I'm" not in cfg["keywords"]
+
+
 def test_vocabulary_prompt_forbids_forcing_a_match():
     """Regression: 'finish' was being rewritten to a term containing 'fin'.
 
