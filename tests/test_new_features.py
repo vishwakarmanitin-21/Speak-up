@@ -188,9 +188,13 @@ def test_deepgram_url_boosts_dictionary_terms(monkeypatch):
 
     monkeypatch.setattr(dg, "Config", lambda: _Cfg())
     url = dg._build_url()
-    assert "keywords=Vestora%3A2" in url
-    assert "keywords=WealQuest%3A2" in url
-    assert "model=nova-2" in url  # base params still present
+    # nova-3 takes plain `keyterm`; the weighted `keywords` form is nova-2 only,
+    # and sending the wrong one loses ALL biasing silently (Deepgram 200s on
+    # unknown params) — which cost 13/13 terms down to 7/13 when tested.
+    assert "model=nova-3" in url
+    assert "keyterm=Vestora" in url
+    assert "keyterm=WealQuest" in url
+    assert "keywords=" not in url
 
 
 # --------------------------------------------------------------------------- #
@@ -256,6 +260,31 @@ def test_build_user_prompt_includes_text_and_vocab():
 def test_live_session_always_uses_a_realtime_model(configured, expected):
     from src.transcription.realtime_client import realtime_model_for
     assert realtime_model_for(configured) == expected
+
+
+def test_usage_tracker_prices_the_engine_that_actually_ran():
+    """Regression: OpenAI live dictations were logged as Deepgram and priced at
+    Deepgram's rate, understating real spend ~4x."""
+    from src.config import Config
+    from src.services.usage_tracker import _STT_PRICES, _stt_model_for
+
+    assert _STT_PRICES["gpt-live-transcribe"] > _STT_PRICES["deepgram"] * 3
+
+    config = Config()
+    saved = {k: config._overrides.get(k) for k in ("transcription_realtime", "live_engine")}
+    try:
+        config._overrides["transcription_realtime"] = True
+        config._overrides["live_engine"] = "openai"
+        assert _stt_model_for("cloud") == "gpt-live-transcribe"
+        config._overrides["live_engine"] = "deepgram"
+        expected = "deepgram" if config.deepgram_api_key else "gpt-live-transcribe"
+        assert _stt_model_for("cloud") == expected
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                config._overrides.pop(k, None)
+            else:
+                config._overrides[k] = v
 
 
 def test_friendly_api_error_names_the_real_problem():

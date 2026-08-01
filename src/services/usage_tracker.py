@@ -31,9 +31,12 @@ _CHAT_PRICES = {
 }
 _CHAT_DEFAULT = (0.15, 0.60)
 # Speech-to-text: $ per minute of audio
-_STT_PRICES = {
+_STT_PRICES = {          # USD per minute of audio (OpenAI list prices, 2026-08)
+    "gpt-live-transcribe": 0.017,   # realtime streaming — ~4x Deepgram
     "gpt-4o-transcribe": 0.006,
+    "gpt-transcribe": 0.0045,
     "gpt-4o-mini-transcribe": 0.003,
+    "gpt-realtime-whisper": 0.017,
     "whisper-1": 0.006,
     "deepgram": 0.0043,
     "local": 0.0,
@@ -46,11 +49,23 @@ _PROMPT_OVERHEAD_TOKENS = 400  # system prompt + context per rewrite
 
 
 def _stt_model_for(provider: str) -> str:
+    """Which model actually transcribed — must mirror the pipeline's choice.
+
+    This previously assumed "Deepgram whenever a key exists", so after the live
+    engine became selectable it reported OpenAI dictations as Deepgram and
+    priced them at Deepgram's rate — understating real spend roughly fourfold,
+    since gpt-live-transcribe is $0.017/min against Deepgram's ~$0.0043.
+    """
     config = Config()
     if provider == "local":
         return "local"
-    if config.transcription_realtime and config.deepgram_api_key:
-        return "deepgram"
+    if config.transcription_realtime:
+        engine = config.live_engine
+        use_deepgram = bool(config.deepgram_api_key) and engine in ("auto", "deepgram")
+        if use_deepgram:
+            return "deepgram"
+        from src.transcription.realtime_client import realtime_model_for
+        return realtime_model_for(config.whisper_model)
     return config.whisper_model
 
 

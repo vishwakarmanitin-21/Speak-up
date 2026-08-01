@@ -30,7 +30,10 @@ logger = logging.getLogger("speakup")
 
 _SAMPLE_RATE = 16000  # Deepgram streams linear16 PCM; 16 kHz is plenty
 _DG_PARAMS = {
-    "model": "nova-2",
+    # nova-3 measurably beats nova-2 on this user's real voice: 13/13 dictionary
+    # terms vs 12/13, and 11.6% vs 16.3% word error rate (verified at the 16 kHz
+    # this client streams). It also takes richer term biasing — see _build_url.
+    "model": "nova-3",
     "language": "en",
     "encoding": "linear16",
     "sample_rate": str(_SAMPLE_RATE),
@@ -69,10 +72,21 @@ def _build_url() -> str:
                 piece = piece.strip()
                 if len(piece) >= 3 and piece not in terms:
                     terms.append(piece)
+        # nova-3 replaced weighted `keywords` with plain `keyterm` (no
+        # intensifiers). Sending the wrong one silently loses all biasing —
+        # Deepgram returns 200 for unknown parameters — and biasing is what
+        # makes the difference here: without the dictionary nova-3 dropped from
+        # 13/13 terms to 7/13.
+        keyterm_style = str(_DG_PARAMS.get("model", "")).startswith("nova-3")
         for term in terms[:_MAX_KEYWORDS]:
-            params.append(("keywords", f"{term}:{_KEYWORD_BOOST}"))
+            if keyterm_style:
+                params.append(("keyterm", term))
+            else:
+                params.append(("keywords", f"{term}:{_KEYWORD_BOOST}"))
         if terms:
-            logger.info("Deepgram: boosting %d dictionary term(s)", len(terms[:_MAX_KEYWORDS]))
+            logger.info("Deepgram: boosting %d dictionary term(s) via %s",
+                        len(terms[:_MAX_KEYWORDS]),
+                        "keyterm" if keyterm_style else "keywords")
     except Exception as e:  # a bad dictionary must never stop transcription
         logger.debug("Could not add dictionary keywords: %s", e)
     return _DG_BASE_URL + urllib.parse.urlencode(params)
