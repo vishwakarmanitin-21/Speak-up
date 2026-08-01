@@ -21,7 +21,7 @@ class WhisperClient:
         Raises:
             TranscriptionError: If the API call fails.
         """
-        from src.services.error_handler import TranscriptionError
+        from src.services.error_handler import TranscriptionError, friendly_api_error
 
         config = Config()
         # Raises APIKeyError (a user-friendly SpeakUpError) if no key is set yet.
@@ -49,5 +49,5 @@ class WhisperClient:
         except Exception as e:
             raise TranscriptionError(
                 f"Whisper transcription failed: {e}",
-                "Transcription failed. Check your API key and internet connection.",
+                friendly_api_error(e, "Transcription"),
             ) from e

@@ -25,6 +25,29 @@ class RecordingError(SpeakUpError):
     pass
 
 
+def friendly_api_error(exc: Exception, action: str) -> str:
+    """A message that names the ACTUAL problem.
+
+    "Check your API key and internet connection" is actively misleading when the
+    key and network are fine and the account has simply run out of credit — it
+    sends you off debugging the wrong thing.
+    """
+    text = str(exc).lower()
+    if any(k in text for k in ("insufficient_quota", "credit_balance_exhausted",
+                               "no credits remaining", "exceeded your current quota")):
+        # Plain ASCII: this text is also written to the console logger, which on
+        # Windows uses a codepage that cannot encode arrows and would raise.
+        return ("Your OpenAI account is out of credits. Add credits at "
+                "platform.openai.com (Settings > Billing), then try again.")
+    if "rate_limit" in text or "429" in text:
+        return f"{action} was rate-limited by OpenAI. Wait a moment and try again."
+    if any(k in text for k in ("invalid_api_key", "incorrect api key", "401")):
+        return f"{action} failed: the OpenAI API key was rejected. Check it in Settings."
+    if any(k in text for k in ("getaddrinfo", "connection", "timeout", "ssl")):
+        return f"{action} failed: could not reach OpenAI. Check your internet connection."
+    return f"{action} failed. Check your API key and internet connection."
+
+
 class TranscriptionError(SpeakUpError):
     """Raised when Whisper API fails."""
     pass

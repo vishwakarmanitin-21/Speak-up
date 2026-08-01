@@ -112,7 +112,7 @@ class RewriteEngine:
         app_hint: tuple[str, str] | None = None,
     ) -> str:
         """Rewrite raw_text using the specified mode (non-streaming)."""
-        from src.services.error_handler import RewriteError
+        from src.services.error_handler import RewriteError, friendly_api_error
 
         messages, model, temperature, key = self._prepare(raw_text, mode, context, app_hint)
         self._ensure_worker()
@@ -131,7 +131,7 @@ class RewriteEngine:
         except Exception as e:
             raise RewriteError(
                 f"GPT rewrite failed: {e}",
-                "Rewrite failed. Check your API key and internet connection.",
+                friendly_api_error(e, "Rewrite"),
             ) from e
 
     async def rewrite_stream(
@@ -142,7 +142,7 @@ class RewriteEngine:
         app_hint: tuple[str, str] | None = None,
     ):
         """Stream the rewritten text as deltas arrive (for low-latency output)."""
-        from src.services.error_handler import RewriteError
+        from src.services.error_handler import RewriteError, friendly_api_error
 
         messages, model, temperature, key = self._prepare(raw_text, mode, context, app_hint)
         self._ensure_worker()
@@ -177,7 +177,7 @@ class RewriteEngine:
             if isinstance(item, tuple) and item and item[0] == "__error__":
                 raise RewriteError(
                     f"GPT rewrite failed: {item[1]}",
-                    "Rewrite failed. Check your API key and internet connection.",
+                    friendly_api_error(item[1], "Rewrite"),
                 )
             yield item
 

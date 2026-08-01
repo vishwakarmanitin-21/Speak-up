@@ -258,6 +258,32 @@ def test_live_session_always_uses_a_realtime_model(configured, expected):
     assert realtime_model_for(configured) == expected
 
 
+def test_friendly_api_error_names_the_real_problem():
+    """Regression: an out-of-credits account showed "check your API key and
+    internet connection" — both of which were fine, sending the user off
+    debugging the wrong thing."""
+    from src.services.error_handler import friendly_api_error
+
+    quota = friendly_api_error(
+        Exception("Error code: 429 - insufficient_quota: You have no credits remaining."),
+        "Transcription")
+    assert "out of credits" in quota.lower()
+    assert "internet" not in quota.lower()
+
+    assert "rate-limited" in friendly_api_error(
+        Exception("rate_limit_exceeded"), "Rewrite").lower()
+    assert "key was rejected" in friendly_api_error(
+        Exception("invalid_api_key"), "Rewrite").lower()
+    assert "internet" in friendly_api_error(
+        Exception("getaddrinfo failed"), "Transcription").lower()
+    # Unrecognised errors keep the original generic advice.
+    assert "api key and internet" in friendly_api_error(
+        Exception("something odd"), "Rewrite").lower()
+    # The streaming path passes a string, not an exception.
+    assert "out of credits" in friendly_api_error(
+        "credit_balance_exhausted", "Rewrite").lower()
+
+
 def test_session_stops_immediately_once_the_final_transcript_arrives():
     """The API sends nothing after the committed buffer's transcript.
 
