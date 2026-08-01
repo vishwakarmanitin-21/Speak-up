@@ -69,9 +69,17 @@ def _stt_model_for(provider: str) -> str:
     return config.whisper_model
 
 
-def _estimate_cost(words_in: int, words_out: int, stt_model: str, gpt_model: str) -> float:
-    """Approximate USD cost of one dictation (transcription + rewrite)."""
-    audio_min = words_in / _WORDS_PER_MIN
+def _estimate_cost(words_in: int, words_out: int, stt_model: str, gpt_model: str,
+                   audio_seconds: float | None = None) -> float:
+    """USD cost of one dictation (transcription + rewrite).
+
+    Speech-to-text is billed per MINUTE OF AUDIO, so the length of the recording
+    is the figure that matters — not how many words were in it. Inferring
+    minutes from word count assumed everyone speaks at _WORDS_PER_MIN, which is
+    wrong in both directions: pauses and thinking time are billed but produce no
+    words. `audio_seconds` is the measured length and is used whenever known.
+    """
+    audio_min = (audio_seconds / 60.0) if audio_seconds else (words_in / _WORDS_PER_MIN)
     stt_cost = _STT_PRICES.get(stt_model, _STT_DEFAULT) * audio_min
 
     in_rate, out_rate = _CHAT_PRICES.get(gpt_model, _CHAT_DEFAULT)
@@ -109,14 +117,20 @@ def record_run(
     mode: str,
     provider: str,
     duration_ms: int,
+    audio_seconds: float | None = None,
 ) -> None:
-    """Append a usage record (with an estimated cost) to usage_stats.json."""
+    """Append a usage record to usage_stats.json.
+
+    audio_seconds is the MEASURED length of the recording. Speech-to-text is
+    billed per minute of audio, so passing it makes the cost real rather than
+    inferred from how many words came back.
+    """
     words_in = len(raw_text.split())
     words_out = len(rewritten_text.split())
     config = Config()
     gpt_model = config.gpt_model
     stt_model = _stt_model_for(provider)
-    cost = _estimate_cost(words_in, words_out, stt_model, gpt_model)
+    cost = _estimate_cost(words_in, words_out, stt_model, gpt_model, audio_seconds)
 
     entry = {
         "ts": datetime.now().isoformat(timespec="seconds"),
@@ -126,6 +140,7 @@ def record_run(
         "gpt_model": gpt_model,
         "words_in": words_in,
         "words_out": words_out,
+        "audio_seconds": round(audio_seconds, 2) if audio_seconds else None,
         "duration_ms": duration_ms,
         "cost_usd": cost,
     }

@@ -262,6 +262,25 @@ def test_live_session_always_uses_a_realtime_model(configured, expected):
     assert realtime_model_for(configured) == expected
 
 
+def test_cost_uses_measured_audio_length_not_word_count():
+    """STT is billed per minute of AUDIO, so a slow speaker with long pauses
+    costs more than their word count implies. Measured length wins when known."""
+    from src.services.usage_tracker import _estimate_cost
+
+    # Same words, very different recording lengths -> different STT cost.
+    short = _estimate_cost(30, 30, "deepgram", "gpt-4o-mini", audio_seconds=12)
+    long = _estimate_cost(30, 30, "deepgram", "gpt-4o-mini", audio_seconds=120)
+    assert long > short
+
+    # A pricier engine costs more for identical audio.
+    dg = _estimate_cost(30, 30, "deepgram", "gpt-4o-mini", audio_seconds=60)
+    live = _estimate_cost(30, 30, "gpt-live-transcribe", "gpt-4o-mini", audio_seconds=60)
+    assert live > dg * 2
+
+    # Without a measurement it still falls back to the old word-count estimate.
+    assert _estimate_cost(30, 30, "deepgram", "gpt-4o-mini") > 0
+
+
 def test_usage_tracker_prices_the_engine_that_actually_ran():
     """Regression: OpenAI live dictations were logged as Deepgram and priced at
     Deepgram's rate, understating real spend ~4x."""

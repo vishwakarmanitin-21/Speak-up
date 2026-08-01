@@ -51,6 +51,7 @@ class Pipeline:
         self._on_caption = None  # callable(str) for live captions (set by the UI)
         self._on_notice = None   # callable(str) for quiet hints (set by the UI)
         self._last_raw_text = ""  # last transcript, for "re-run in another mode"
+        self._record_started_at: float | None = None  # for billable audio length
         self._vocab_learner = None  # lazy VocabLearner (auto-learning dictionary)
 
         # Wire silence detection into audio callback
@@ -113,6 +114,9 @@ class Pipeline:
 
     def start_recording(self) -> None:
         self._cancelled = False
+        # Speech-to-text is billed per minute of AUDIO, so the recording's real
+        # length is what determines cost — not the word count it produced.
+        self._record_started_at = time.monotonic()
         self._silence_detector.reset()
         # Capture the foreground app now — by rewrite time focus may have moved.
         try:
@@ -201,6 +205,10 @@ class Pipeline:
         """
         self._cancelled = False
         _start = time.monotonic()
+        # How long the mic was actually open — the billable quantity for STT.
+        _audio_seconds = (
+            _start - self._record_started_at if self._record_started_at else None
+        )
         config = Config()
         logger.info(
             "Pipeline run: mode=%s, model=%s, provider=%s",
@@ -313,6 +321,7 @@ class Pipeline:
                         mode=mode.value,
                         provider=config.transcription_provider,
                         duration_ms=int((time.monotonic() - _start) * 1000),
+                        audio_seconds=_audio_seconds,
                     )
                 except Exception:
                     pass
