@@ -241,16 +241,50 @@ def test_build_user_prompt_includes_text_and_vocab():
 
 
 @pytest.mark.parametrize("configured,expected", [
-    ("gpt-transcribe", "gpt-live-transcribe"),   # file-only → must not be used live
+    # The file-path setting must NEVER leak into the live session. Regression:
+    # with gpt-4o-transcribe configured, the live session produced 0 deltas and
+    # captions silently stopped.
+    ("gpt-4o-transcribe", "gpt-live-transcribe"),
+    ("gpt-4o-mini-transcribe", "gpt-live-transcribe"),
+    ("gpt-transcribe", "gpt-live-transcribe"),
     ("whisper-1", "gpt-live-transcribe"),
     ("", "gpt-live-transcribe"),
-    ("gpt-4o-transcribe", "gpt-4o-transcribe"),  # realtime-capable → passes through
-    ("gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe"),
+    # A realtime-specific model the user chose deliberately is honoured.
+    ("gpt-live-transcribe", "gpt-live-transcribe"),
+    ("gpt-realtime-whisper", "gpt-realtime-whisper"),
 ])
-def test_realtime_never_gets_a_file_only_model(configured, expected):
-    """Picking a file-only speech model must not break live transcription."""
+def test_live_session_always_uses_a_realtime_model(configured, expected):
     from src.transcription.realtime_client import realtime_model_for
     assert realtime_model_for(configured) == expected
+
+
+def test_turn_detection_disabled_for_streaming_models():
+    """Regression: gpt-live-transcribe REJECTS turn_detection.
+
+    Sending it returned "Turn detection is not supported for this transcription
+    model", which aborted the session — 0 deltas, so captions vanished entirely.
+    Legacy models still need VAD to close segments.
+    """
+    from src.transcription.realtime_client import turn_detection_for
+
+    assert turn_detection_for("gpt-live-transcribe", 250) is None
+    legacy = turn_detection_for("gpt-4o-transcribe", 250)
+    assert legacy and legacy["type"] == "server_vad"
+    assert legacy["silence_duration_ms"] == 250
+
+
+def test_keywords_only_sent_to_models_that_accept_them():
+    """Regression: 'keywords is not supported for this model' killed the session.
+
+    The error aborted live transcription entirely, so captions vanished and every
+    dictation fell back to batch.
+    """
+    from src.transcription.realtime_client import build_transcription_config
+
+    vocab = ["Vestora", "KFinTech"]
+    assert "keywords" in build_transcription_config("gpt-live-transcribe", vocab)
+    legacy = build_transcription_config("gpt-4o-transcribe", vocab)
+    assert "keywords" not in legacy and "prompt" not in legacy
 
 
 @pytest.mark.parametrize("engine,has_key,expect_deepgram", [

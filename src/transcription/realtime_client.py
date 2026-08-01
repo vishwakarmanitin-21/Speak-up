@@ -63,19 +63,47 @@ async def _ws_connect(url: str, headers: dict):
 # used in a realtime session but only transcribes after commit — no live text —
 # so neither can drive this path.
 _REALTIME_DEFAULT = "gpt-live-transcribe"
-_NO_LIVE_DELTAS = {"gpt-transcribe", "whisper-1"}
+# ONLY these are realtime transcription models. The "Speech Model (cloud)"
+# setting governs the FILE path, and letting it leak in here was a real bug:
+# with it set to gpt-4o-transcribe the session produced 0 deltas and captions
+# silently stopped. The live path picks its own model.
+_REALTIME_MODELS = {"gpt-live-transcribe", "gpt-realtime-whisper"}
 
 # The newer models take a `languages` ARRAY; the legacy ones take a `language`
 # string. Sending both is explicitly not allowed.
 _LANGUAGES_ARRAY_MODELS = {"gpt-live-transcribe", "gpt-transcribe"}
+# `keywords` is rejected outright by older models ("not supported for this
+# model"), which kills the whole session — so it is sent only where supported.
+_KEYWORDS_MODELS = {"gpt-live-transcribe", "gpt-transcribe"}
+
+
+def turn_detection_for(model: str, silence_ms: int) -> dict | None:
+    """Server-VAD config for `model`, or None where it is not supported.
+
+    gpt-live-transcribe streams deltas continuously and REJECTS turn_detection
+    ("Turn detection is not supported for this transcription model"), which
+    aborts the session and kills captions entirely. Older models rely on VAD to
+    close segments, so they keep it.
+    """
+    if model in _REALTIME_MODELS:
+        return None
+    return {
+        "type": "server_vad",
+        "threshold": 0.5,
+        "prefix_padding_ms": 200,
+        "silence_duration_ms": silence_ms,
+    }
 
 
 def realtime_model_for(configured: str) -> str:
-    """Map the configured speech model to one that can stream live captions."""
+    """Pick the model for a live session.
+
+    Only a realtime-specific model is honoured; anything else (a file model such
+    as gpt-4o-transcribe or gpt-transcribe) falls back to the model actually
+    built for streaming captions.
+    """
     model = (configured or "").strip()
-    if not model or model in _NO_LIVE_DELTAS or "transcribe" not in model:
-        return _REALTIME_DEFAULT
-    return model
+    return model if model in _REALTIME_MODELS else _REALTIME_DEFAULT
 
 
 def build_transcription_config(model: str, vocabulary: list[str] | None = None) -> dict:
@@ -90,6 +118,9 @@ def build_transcription_config(model: str, vocabulary: list[str] | None = None) 
         cfg["languages"] = ["en"]
     else:
         cfg["language"] = "en"
+
+    if model not in _KEYWORDS_MODELS:
+        return cfg          # older models reject biasing and drop the session
 
     terms: list[str] = []
     try:
@@ -175,6 +206,7 @@ class RealtimeTranscriber:
             # Shorter silence_duration_ms = segments close on shorter pauses =
             # more frequent / less-laggy captions (config-tunable).
             silence_ms = int(Config().realtime_vad_silence_ms)
+            turn_detection = turn_detection_for(self._model, silence_ms)
             await ws.send(json.dumps({
                 "type": _EVT_SESSION_UPDATE,
                 "session": {
@@ -185,17 +217,13 @@ class RealtimeTranscriber:
                             "transcription": build_transcription_config(
                                 self._model, Config().custom_vocabulary
                             ),
-                            "turn_detection": {
-                                "type": "server_vad",
-                                "threshold": 0.5,
-                                "prefix_padding_ms": 200,
-                                "silence_duration_ms": silence_ms,
-                            },
+                            "turn_detection": turn_detection,
                         },
                     },
                 },
             }))
-            logger.info("Realtime transcription started (model=%s)", self._model)
+            logger.info("Realtime transcription started (model=%s, vad=%s)",
+                        self._model, "server" if turn_detection else "none")
 
             loop = asyncio.get_running_loop()
             finalized: list[str] = []
@@ -210,10 +238,18 @@ class RealtimeTranscriber:
                 # Stream newly-captured audio (server VAD transcribes it live).
                 sent = await self._flush_from(ws, sent)
 
-                # On release: send the tail. Do NOT commit — server VAD already
-                # consumes the buffer, so a manual commit hits an empty buffer.
+                # On release: send the tail, then finalize.
+                # With server VAD, do NOT commit — VAD already consumes the
+                # buffer, so a manual commit would hit an empty one. Without VAD
+                # (gpt-live-transcribe) nothing closes the buffer, so an explicit
+                # commit is what produces the final transcript.
                 if self._stop and stop_at == 0.0:
                     sent = await self._flush_from(ws, sent)
+                    if turn_detection is None:
+                        try:
+                            await ws.send(json.dumps({"type": _EVT_AUDIO_COMMIT}))
+                        except Exception:
+                            pass
                     stop_at = loop.time()
                     last_event = loop.time()
 
