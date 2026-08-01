@@ -77,6 +77,24 @@ _LANGUAGES_ARRAY_MODELS = {"gpt-live-transcribe", "gpt-transcribe"}
 _KEYWORDS_MODELS = {"gpt-live-transcribe", "gpt-transcribe"}
 
 
+_QUIET_S = 0.8      # no events for this long after release -> assume done
+_HARD_CAP_S = 3.0   # absolute ceiling so a stalled session can't hang a dictation
+
+
+def should_finish(final_after_commit: bool, since_last_event: float,
+                  since_stop: float) -> bool:
+    """Whether the session can stop waiting, once the key has been released.
+
+    Arriving at the committed buffer's transcript ends the stream — the API
+    sends nothing after it — so waiting out the quiet period would just add
+    ~0.8s to every dictation. The quiet/cap rules remain for the VAD path and
+    as a backstop when no final transcript arrives.
+    """
+    if final_after_commit:
+        return True
+    return since_last_event > _QUIET_S or since_stop > _HARD_CAP_S
+
+
 def turn_detection_for(model: str, silence_ms: int) -> dict | None:
     """Server-VAD config for `model`, or None where it is not supported.
 
@@ -231,6 +249,7 @@ class RealtimeTranscriber:
             sent = 0
             deltas = 0
             stop_at = 0.0
+            final_after_commit = False
             last_event = loop.time()
             hard_deadline = loop.time() + 600.0
 
@@ -281,14 +300,22 @@ class RealtimeTranscriber:
                             partial = ""
                             last_event = loop.time()
                             self._emit_caption(" ".join(finalized).strip())
+                            # Without VAD we commit exactly once on release, so
+                            # this transcript IS the end of the stream — verified
+                            # against the API that nothing follows it. Waiting out
+                            # the quiet period below would just add ~0.8s.
+                            if stop_at and turn_detection is None:
+                                final_after_commit = True
                         elif etype == "error":
                             logger.warning("Realtime error event: %s",
                                            event.get("error", {}).get("message", "?"))
 
-                # After release: finish once transcripts go quiet (or a hard cap).
+                # After release: stop as soon as the final transcript is in;
+                # otherwise wait for things to go quiet (or hit a hard cap).
                 if stop_at:
                     now = loop.time()
-                    if now - last_event > 0.8 or now - stop_at > 3.0:
+                    if should_finish(final_after_commit, now - last_event,
+                                     now - stop_at):
                         break
                 if loop.time() > hard_deadline:
                     break

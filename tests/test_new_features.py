@@ -258,6 +258,22 @@ def test_live_session_always_uses_a_realtime_model(configured, expected):
     assert realtime_model_for(configured) == expected
 
 
+def test_session_stops_immediately_once_the_final_transcript_arrives():
+    """The API sends nothing after the committed buffer's transcript.
+
+    Waiting out the quiet period anyway added ~0.8s to every dictation on the
+    OpenAI engine, which was most of its latency gap vs Deepgram.
+    """
+    from src.transcription.realtime_client import should_finish
+
+    # Final transcript in hand -> done, however recently events arrived.
+    assert should_finish(True, 0.0, 0.0) is True
+    # Without it, still wait for quiet or the hard cap.
+    assert should_finish(False, 0.1, 0.5) is False
+    assert should_finish(False, 1.0, 1.0) is True   # gone quiet
+    assert should_finish(False, 0.1, 5.0) is True   # hard cap protects us
+
+
 def test_turn_detection_disabled_for_streaming_models():
     """Regression: gpt-live-transcribe REJECTS turn_detection.
 
