@@ -17,9 +17,30 @@ what the user already told us (their dictionary) — no correction capture, no
 stored speech, no privacy trade-off, no added latency.
 
 Precision is deliberately favoured over recall: a wrong replacement corrupts the
-user's words, while a miss just leaves the old behaviour. Hence the guards —
-minimum term length, no replacing common English words, and exact key matching
-(near-matches only for long, distinctive keys).
+user's words, while a miss just leaves the old behaviour.
+
+WHY THE GUARDS BELOW ARE SO HEAVY
+---------------------------------
+Flattening every vowel to one symbol makes the key short and low-entropy, so
+ordinary English words collide with dictionary terms outright: "houses",
+"issues", "assess" and "excess" all fold to the same key as "Axis"; "medium"
+and "Notion" fold to "Nitin"; "guides" to "Codex". Sliding windows made it
+worse — they happily swallowed a neighbouring word ("of Vestora" -> "Vestora")
+or a sentence boundary ("Vestora. I" -> "Vestora"), silently deleting speech.
+
+So a sound-key hit is now treated as a *candidate*, not a verdict, and has to
+survive three further checks:
+
+  1. Vowel agreement — the sound key is re-checked with the vowels PUT BACK,
+     and must still be within roughly a third of the term's length in edits.
+     Vowels are dropped in the first pass because STT mangles them, but it
+     mangles them a little ("Wursal"/"Vercel"), not beyond recognition; the
+     collisions differ in almost every vowel ("houses"/"Axis").
+  2. Ordinary-English protection — a word that is ordinary English (including
+     its plural/past/-ing forms) is never overwritten.
+  3. Window sanity — a multi-word window may not contain a function word, may
+     not cross a clause or sentence boundary, may not already contain the term,
+     and must match its key exactly rather than fuzzily.
 """
 from __future__ import annotations
 
@@ -53,8 +74,18 @@ _MAX_WINDOW = 4          # how many transcript words a term may have been split 
 # Multi-word matches therefore have to clear a longer, more distinctive key —
 # "Vestora" (7), "WealQuest" (8) and "Wealducate" (9) still qualify.
 _MULTIWORD_MIN_KEY = 6
+# Below this many symbols, a vowel-sensitive key must match exactly: short
+# acronyms ("Axis", "SEBI", "CAMS") sit one edit away from ordinary words.
+_NO_SLACK_KEY_LEN = 5
 
-# Never rewrite these, however they sound — they are ordinary English.
+# Punctuation that ends a clause or sentence. A term cannot have been split
+# across one of these, so a window is never allowed to span it — that is how
+# "Vestora. I" lost both the full stop and the "I".
+_CLAUSE_PUNCT = frozenset(".?!,;:")
+
+# Never rewrite these, however they sound — they are ordinary English. The short
+# function words matter mainly inside multi-word windows, where the minimum
+# term length cannot protect them: "of", "is", "our" and "the" were all eaten.
 _NEVER_REPLACE = {
     "the", "this", "that", "there", "their", "they", "them", "then", "than",
     "and", "but", "for", "with", "from", "have", "has", "was", "were", "will",
@@ -63,15 +94,26 @@ _NEVER_REPLACE = {
     "you", "our", "not", "are", "any", "all", "can", "may", "one", "two",
     "some", "such", "into", "over", "under", "just", "like", "make", "made",
     "want", "need", "here", "more", "most", "much", "many", "well", "very",
+    # function words that only ever show up mid-window
+    "a", "an", "as", "at", "be", "been", "being", "by", "do", "does", "did",
+    "he", "her", "him", "his", "how", "i", "if", "in", "is", "it", "its",
+    "me", "my", "no", "of", "off", "on", "or", "other", "out", "own", "per",
+    "she", "so", "these", "those", "to", "up", "us", "via", "we",
+    "who", "whom", "whose", "why", "yes", "yet", "am", "also", "only", "even",
+    "ever", "each", "both", "same", "still", "every", "again", "already",
 }
 
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
 
 
-# Everyday English that sometimes ends up in a personal dictionary (accepted
-# suggestions, typos). Deliberately NOT the vocab-learner stop-list: that one
-# also holds brands like LinkedIn and GitHub, which are perfectly good
-# dictionary entries — this set is only about ordinary words.
+# Everyday English that must never be overwritten by a dictionary term, and
+# that must never BE a correction target either. Two jobs, one list:
+#   - as a target: dictionaries pick up ordinary words over time ("Order",
+#     "Speak", "Additionally"); matching on those rewrites normal English.
+#   - as a candidate: "houses", "issues", "assess" and "medium" are real words
+#     the user meant, whatever they happen to fold to.
+# Deliberately NOT the vocab-learner stop-list: that one also holds brands like
+# LinkedIn and GitHub, which are perfectly good dictionary entries.
 _ORDINARY_EXTRA = {
     "order", "world", "speak", "code", "note", "notes", "report", "review",
     "update", "draft", "email", "team", "plan", "action", "task", "time",
@@ -83,7 +125,23 @@ _ORDINARY_EXTRA = {
     # discourse adverbs that often start a sentence and get mis-learned
     "additionally", "however", "therefore", "basically", "actually", "finally",
     "currently", "generally", "obviously", "definitely", "probably", "overall",
+    # observed collisions: every one of these was being silently overwritten
+    # with a dictionary term in real dictations (see the module docstring)
+    "house", "assess", "access", "excess", "medium", "notion", "guide", "case",
+    "cause", "cost", "count", "con", "cons", "pros", "size", "sense", "since",
+    "success", "process", "service", "source", "course", "choice", "chance",
+    "class", "cash", "cast", "list", "least", "last", "next", "best", "test",
+    "store", "restore", "state", "study", "system", "side", "step", "sets",
+    "view", "video", "voice", "vault", "cloud", "clear", "credit",
+    "debit", "bank", "fund", "funds", "asset", "assets", "share", "shares",
+    "market", "price", "rate", "risk", "unit", "units", "date",
+    "welcome", "boss", "oasis",
 }
+
+
+def _plain(text: str) -> str:
+    """Letters only, lowercased — the form spellings are compared in."""
+    return re.sub(r"[^a-z]", "", (text or "").lower())
 
 
 def _is_ordinary_word(term: str) -> bool:
@@ -97,6 +155,46 @@ def _is_ordinary_word(term: str) -> bool:
     if "'" in low:                       # contractions: "I'm", "Let's"
         return True
     return low in _NEVER_REPLACE or low in _ORDINARY_EXTRA
+
+
+def _is_english_candidate(word: str) -> bool:
+    """True if the transcript word is ordinary English and must be left alone.
+
+    Checks the plural/past/-ing forms too, so protecting "issue" also protects
+    "issues" — otherwise the list would need every inflection spelled out and
+    would still miss one.
+    """
+    low = _plain(word)
+    if not low:
+        return False
+    if low in _NEVER_REPLACE or low in _ORDINARY_EXTRA:
+        return True
+    for suffix in ("ing", "ed", "es", "s"):
+        if not low.endswith(suffix):
+            continue
+        base = low[: -len(suffix)]
+        if len(base) < 3:
+            continue
+        if base in _NEVER_REPLACE or base in _ORDINARY_EXTRA:
+            return True
+        # "issues" -> "issue", "changes" -> "change": dropping the -s exposes a
+        # base that still needs its silent -e put back.
+        if suffix in ("es", "s") and (base + "e") in _ORDINARY_EXTRA:
+            return True
+    return False
+
+
+def _vowel_allowance(term_key: str) -> int:
+    """How far the vowel-sensitive keys may differ and still count as a match.
+
+    Short keys get no slack at all: a four-symbol key is already so close to
+    everything that one edit of leeway lets "oasis" reach "Axis" and "scipy"
+    reach "SEBI". Longer names get the room a real mis-hearing needs — "Wursal"
+    is two edits from "Vercel" and genuinely is one.
+    """
+    if len(term_key) < _NO_SLACK_KEY_LEN:
+        return 0
+    return max(1, len(term_key) // 3)
 
 
 def sound_key(text: str) -> str:
@@ -120,6 +218,30 @@ def sound_key(text: str) -> str:
     return "".join(collapsed)
 
 
+# The same folding, but with the vowels left intact. `sound_key` deliberately
+# throws vowels away — that is what lets it match "Wellquest" to "WealQuest",
+# and equally what makes "houses" collide with "Axis". This second key is the
+# tie-breaker: it forgives the consonant swaps STT really makes (v/w, soft c)
+# while still noticing that "houses" and "Axis" share no vowel at all.
+_VOWEL_FOLD = dict(_LETTER_FOLD, a="a", e="e", i="i", o="o", u="u", y="i")
+
+
+def vowel_key(text: str) -> str:
+    """`sound_key`, but keeping each vowel's identity."""
+    s = re.sub(r"[^a-z]", "", (text or "").lower())
+    if not s:
+        return ""
+    for a, b in _DIGRAPHS:
+        s = s.replace(a, b)
+    s = re.sub(r"c(?=[eiy])", "s", s)
+    folded = "".join(_VOWEL_FOLD.get(ch, ch) for ch in s)
+    collapsed: list[str] = []
+    for ch in folded:
+        if not collapsed or collapsed[-1] != ch:
+            collapsed.append(ch)
+    return "".join(collapsed)
+
+
 def _edit_distance(a: str, b: str, cap: int = 2) -> int:
     """Levenshtein distance, short-circuited once it exceeds `cap`."""
     if abs(len(a) - len(b)) > cap:
@@ -133,6 +255,12 @@ def _edit_distance(a: str, b: str, cap: int = 2) -> int:
             return cap + 1
         prev = cur
     return prev[-1]
+
+
+def _trailing_punct(token: str) -> str:
+    """Whatever followed the word inside `token` ("Vestora," -> ",")."""
+    m = _TOKEN_RE.search(token)
+    return token[m.end():] if m else token
 
 
 class PhoneticCorrector:
@@ -161,13 +289,16 @@ class PhoneticCorrector:
     def active(self) -> bool:
         return bool(self._by_key)
 
-    def _lookup(self, key: str) -> str | None:
+    def _lookup(self, key: str, allow_fuzzy: bool = True) -> str | None:
         if not key:
             return None
         hit = self._by_key.get(key)
         if hit is not None:
             return hit
-        if len(key) >= _FUZZY_MIN_KEY_LEN:
+        # Fuzzy matching is single-word only. Across a window it was matching a
+        # term PLUS a neighbouring word ("of Vestora" is one edit from
+        # "Vestora"), and replacing the pair deleted the neighbour.
+        if allow_fuzzy and len(key) >= _FUZZY_MIN_KEY_LEN:
             # Allow one dropped/added sound, but only for long distinctive keys.
             best, best_d = None, 2
             for k, term in self._by_key.items():
@@ -206,20 +337,34 @@ class PhoneticCorrector:
                 joined = "".join(words)
                 if len(joined) < _MIN_TERM_LEN:
                     continue
-                if size == 1 and words[0].lower() in _NEVER_REPLACE:
+                # A word the user actually meant is never overwritten, however
+                # it folds. This is what keeps "houses" from becoming "Axis".
+                if size == 1 and _is_english_candidate(words[0]):
+                    continue
+                if size > 1 and not self._window_is_joinable(window):
                     continue
                 key = sound_key(joined)
                 if size > 1 and len(key) < _MULTIWORD_MIN_KEY:
                     continue      # too short to safely stitch words together
-                term = self._lookup(key)
+                term = self._lookup(key, allow_fuzzy=(size == 1))
                 if term is None:
                     continue
-                if joined.lower() == term.replace(" ", "").lower():
+                joined_plain, term_plain = _plain(joined), _plain(term)
+                if joined_plain == term_plain:
                     continue                      # already correct — leave it alone
+                # A window that already contains the term is not a mis-hearing;
+                # merging it would swallow the neighbouring word.
+                if size > 1 and any(_plain(w) == term_plain for w in words):
+                    continue
+                # Matching with the vowels thrown away is not enough — put them
+                # back and the two must still agree. "houses" and "Axis" are
+                # identical without vowels and unrecognisable with them.
+                term_vk, cand_vk = vowel_key(term), vowel_key(joined)
+                allowance = _vowel_allowance(term_vk)
+                if _edit_distance(cand_vk, term_vk, cap=allowance) > allowance:
+                    continue
                 # Keep whatever punctuation trailed the last token of the window.
-                last = window[-1]
-                m = _TOKEN_RE.search(last)
-                trailing = last[m.end():] if m else ""
+                trailing = _trailing_punct(window[-1])
                 leading = ""
                 m0 = _TOKEN_RE.search(window[0])
                 if m0:
@@ -233,6 +378,26 @@ class PhoneticCorrector:
                 out.append(tokens[i])
                 i += 1
         return " ".join(out)
+
+    @staticmethod
+    def _window_is_joinable(window: list[str]) -> bool:
+        """Whether these adjacent tokens could plausibly be one split-up term.
+
+        A term is spoken as one continuous sound, so it cannot straddle a clause
+        or sentence break — that guard alone recovers "Vestora. I", "folder, I"
+        and "want. Are you", all of which silently lost a word.
+
+        Note there is deliberately NO "window contains a function word" rule:
+        the whole point of windowing is that STT splits a name INTO ordinary
+        words, and the flagship case ("west or a" -> "Vestora") is two function
+        words out of three. The spelling-proximity check below is what keeps
+        "we start the" and "what's there" from being swallowed instead.
+        """
+        return not any(
+            ch in _CLAUSE_PUNCT
+            for token in window[:-1]
+            for ch in _trailing_punct(token)
+        )
 
 
 def build_corrector() -> PhoneticCorrector:
